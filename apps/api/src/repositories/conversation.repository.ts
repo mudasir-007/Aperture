@@ -45,3 +45,24 @@ export async function updateConversationTitle(id: string, title: string): Promis
 export async function deleteConversation(id: string): Promise<void> {
   await query('DELETE FROM conversations WHERE id = $1', [id]);
 }
+
+export async function findConversationByIdForUser(
+  id: string,
+  userId: string
+): Promise<ConversationRow | undefined> {
+  const result = await query<ConversationRow>(
+    'SELECT * FROM conversations WHERE id = $1 AND user_id = $2',
+    [id, userId]
+  );
+  return result.rows[0];
+}
+
+export async function listConversationsForUser(
+  userId: string
+): Promise<ConversationRow[]> {
+  return findConversationsByUser(userId);
+}
+
+export async function touchConversation(id: string): Promise<void> {
+  await query('UPDATE conversations SET updated_at = now() WHERE id = $1', [id]);
+}

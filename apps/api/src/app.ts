@@ -1,23 +1,19 @@
-// apps/api/src/app.ts
 import express from 'express';
-import { errorHandler } from './middleware/errorHandler'; // NOT error.middleware
+import { errorHandler } from './middleware/errorHandler';
 import authRoutes from './routes/auth.routes';
-import documentRoutes from './routes/document.routes';
+import documentRoutes from './routes/documents.routes';
 import chatRoutes from './routes/chat.routes';
+import healthRoutes from './routes/health.routes';
 
-const app = express();
+export function createApp() {
+  const app = express();
+  app.use(express.json());
 
-app.use(express.json());
+  app.use('/health', healthRoutes);
+  app.use('/api/v1/auth', authRoutes);
+  app.use('/api/v1/documents', documentRoutes);
+  app.use('/api/v1/chat', chatRoutes);
 
-// Routes
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1/documents', documentRoutes);
-app.use('/api/v1/chat', chatRoutes);
-
-// Health check
-app.get('/health', (req, res) => res.json({ status: 'ok' }));
-
-// Global error handler (MUST be last)
-app.use(errorHandler);
-
-export default app;
+  app.use(errorHandler);
+  return app;
+}

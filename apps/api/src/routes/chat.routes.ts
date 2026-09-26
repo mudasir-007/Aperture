@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { requireAuth, AuthedRequest } from '../middleware/auth.middleware';
+import { requireAuth, AuthedRequest } from '../middleware/auth';
 import { chat } from '../services/chat.service';
 import {
   listConversations,

@@ -34,7 +34,7 @@ export async function countChunksForDocument(documentId: string): Promise<number
     'SELECT COUNT(*)::int AS count FROM document_chunks WHERE document_id = $1',
     [documentId]
   );
-  return result.rows[0]?.count ?? 0;
+  return Number(result.rows[0]?.count ?? 0);
 }
 
 /**

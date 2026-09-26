@@ -61,3 +61,24 @@ export async function findDocumentsByOrg(organizationId: string): Promise<Docume
 export async function deleteDocument(id: string): Promise<void> {
   await query('DELETE FROM documents WHERE id = $1', [id]);
 }
+export async function findDocumentByIdForOrg(
+  id: string,
+  organizationId: string
+): Promise<DocumentRow | undefined> {
+  const result = await query<DocumentRow>(
+    'SELECT * FROM documents WHERE id = $1 AND organization_id = $2',
+    [id, organizationId]
+  );
+  return result.rows[0];
+}
+
+export async function listDocumentsForOrg(
+  organizationId: string
+): Promise<DocumentRow[]> {
+  const result = await query<DocumentRow>(
+    'SELECT * FROM documents WHERE organization_id = $1 ORDER BY created_at DESC',
+    [organizationId]
+  );
+  return result.rows;
+}
+

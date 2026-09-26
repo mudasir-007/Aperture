@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { requireAuth, AuthedRequest } from '../middleware/auth.middleware';
+import { requireAuth, AuthedRequest } from '../middleware/auth';
 import {
   uploadDocument,
   listDocuments,

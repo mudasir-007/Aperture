@@ -1,14 +1,14 @@
 import { Router } from 'express';
-import { getDb } from '../db/database';
+import { query } from '../db/database';
 
 const router = Router();
 
-router.get('/', (_req, res) => {
+router.get('/', async (_req, res, next) => {
   try {
-    getDb().prepare('SELECT 1').get();
-    res.status(200).json({ status: 'ok', database: 'connected' });
-  } catch {
-    res.status(503).json({ status: 'degraded', database: 'unreachable' });
+    await query('SELECT 1');
+    res.json({ status: 'ok', db: 'connected', timestamp: new Date().toISOString() });
+  } catch (err) {
+    next(err);
   }
 });
 
