@@ -19,9 +19,10 @@ export function errorHandler(
 
   if (err instanceof ZodError) {
     res.status(400).json({
-      error: 'Validation failed',
-      details: err.errors,
-      requestId,
+      error: {
+        message: 'Validation failed.',
+        details: err.flatten().fieldErrors,
+      },
     });
     return;
   }
