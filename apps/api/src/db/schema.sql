@@ -16,7 +16,6 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member',
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
-  s3_key TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -29,6 +28,7 @@ CREATE TABLE IF NOT EXISTS documents (
   filename TEXT NOT NULL,
   mime_type TEXT NOT NULL,
   size_bytes INTEGER NOT NULL,
+  s3_key TEXT,
   status TEXT NOT NULL DEFAULT 'processing',
   error_message TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -43,14 +43,12 @@ CREATE TABLE IF NOT EXISTS document_chunks (
   document_id UUID NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   chunk_index INTEGER NOT NULL,
-  embedding vector(1536),   -- OpenAI text-embedding-3-small dimension
+  embedding vector(1536),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS idx_chunks_document ON document_chunks(document_id);
 
--- HNSW index for fast approximate nearest-neighbour search.
--- Build this AFTER initial data load for best results.
 CREATE INDEX IF NOT EXISTS idx_chunks_embedding_hnsw
   ON document_chunks
   USING hnsw (embedding vector_cosine_ops)
@@ -85,3 +83,6 @@ CREATE TABLE IF NOT EXISTS citations (
 );
 
 CREATE INDEX IF NOT EXISTS idx_citations_message ON citations(message_id);
+
+-- Idempotent migration for existing databases that already had a documents table.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_key TEXT;
