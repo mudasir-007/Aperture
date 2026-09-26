@@ -11,8 +11,13 @@ async function main() {
   await initDb();
   logger.info('db schema ready');
 
-  await ensureBucket();
-  logger.info({ bucket: env.S3_BUCKET }, 's3 bucket ready');
+  try {
+    await ensureBucket();
+    logger.info({ bucket: env.S3_BUCKET }, 's3 bucket ready');
+  } catch (err) {
+    logger.warn({ err }, 's3 bucket init failed — document upload will be unavailable until S3 is reachable');
+  }
+
 
   const worker = startIngestionWorker();
   logger.info('ingestion worker started');
