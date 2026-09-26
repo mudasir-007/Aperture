@@ -1,45 +1,27 @@
-import { NavLink, Route, Routes, Navigate } from 'react-router-dom';
-import { useAuth } from './context/AuthContext';
-import { RequireAuth } from './components/RequireAuth';
-import { LoginPage } from './pages/LoginPage';
-import { DocumentsPage } from './pages/DocumentsPage';
-import { ChatPage } from './pages/ChatPage';
+import { Routes, Route, Navigate } from 'react-router-dom';
+import Login from './pages/Login';
+import Chat from './pages/Chat';
+import { getToken } from './lib/api';
 
-export function App() {
-  const { user, logout, token } = useAuth();
+function RequireAuth({ children }: { children: React.ReactNode }) {
+  if (!getToken()) return <Navigate to="/login" replace />;
+  return <>{children}</>;
+}
 
+export default function App() {
   return (
-    <div className="app-shell">
-      {token && (
-        <header className="top-bar">
-          <div className="brand">RAG Chat</div>
-          <nav>
-            <NavLink to="/chat" className={({ isActive }) => (isActive ? 'active' : '')}>
-              Chat
-            </NavLink>
-            <NavLink to="/documents" className={({ isActive }) => (isActive ? 'active' : '')}>
-              Documents
-            </NavLink>
-          </nav>
-          <div className="user-info">
-            <span>{user?.name}</span>
-            <button className="link-button" onClick={logout}>
-              Log out
-            </button>
-          </div>
-        </header>
-      )}
-
-      <div className="app-body">
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
-          <Route element={<RequireAuth />}>
-            <Route path="/chat" element={<ChatPage />} />
-            <Route path="/documents" element={<DocumentsPage />} />
-          </Route>
-          <Route path="*" element={<Navigate to={token ? '/chat' : '/login'} replace />} />
-        </Routes>
-      </div>
-    </div>
+    <Routes>
+      <Route path="/" element={<Navigate to="/chat" replace />} />
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="/chat"
+        element={
+          <RequireAuth>
+            <Chat />
+          </RequireAuth>
+        }
+      />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
