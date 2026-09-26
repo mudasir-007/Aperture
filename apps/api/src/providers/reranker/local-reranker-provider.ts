@@ -1,4 +1,4 @@
-import {
+import { logger } from '../../logger';import {
   AutoModelForSequenceClassification,
   AutoTokenizer,
   env as hfEnv,

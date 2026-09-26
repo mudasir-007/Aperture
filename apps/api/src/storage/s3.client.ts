@@ -1,3 +1,4 @@
+import { logger } from '../logger';
 import {
   S3Client,
   PutObjectCommand,

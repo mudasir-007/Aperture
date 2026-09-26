@@ -11,6 +11,8 @@
     "test": "NODE_ENV=test DATABASE_URL=\"postgresql://postgres:postgres@localhost:5432/rag_chat_test\" JWT_SECRET=\"test-secret-please-ignore-1234\" EMBEDDING_PROVIDER=mock LLM_PROVIDER=mock jest --runInBand",
     "seed": "ts-node --transpile-only scripts/seed.ts",
     "eval": "tsx eval/run.ts",
+    "pino": "^9.5.0",
+    "pino-http": "^10.3.0",
     "eval:retrieval-only": "tsx eval/run.ts --skip-generation"
   },
   "dependencies": {

@@ -34,6 +34,7 @@ const envSchema = z.object({
   .default('true')
   .transform((v) => v === 'true'),
   QUERY_REWRITE_MIN_HISTORY: z.coerce.number().default(2),
+  LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
 export const env = envSchema.parse(process.env);

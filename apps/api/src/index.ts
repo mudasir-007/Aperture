@@ -3,39 +3,39 @@ import { env } from './config/env';
 import { initDb, closeDb } from './db/database';
 import { startIngestionWorker } from './queue/ingestion.queue';
 import { ensureBucket } from './storage/s3.client';
+import { logger } from './logger';
 
 async function main() {
-  // 1. Database schema (idempotent — safe on every boot).
+  logger.info({ nodeEnv: env.NODE_ENV }, 'starting api');
+
   await initDb();
-  console.log('[db] schema ready');
+  logger.info('db schema ready');
 
-  // 2. Object storage bucket (creates if missing).
   await ensureBucket();
-  console.log('[s3] bucket ready');
+  logger.info({ bucket: env.S3_BUCKET }, 's3 bucket ready');
 
-  // 3. Background worker for document ingestion.
   const worker = startIngestionWorker();
-  console.log('[ingestion] worker started');
+  logger.info('ingestion worker started');
 
-  // 4. HTTP server.
   const app = createApp();
   const server = app.listen(env.PORT, () => {
-    console.log(`API listening on port ${env.PORT}`);
+    logger.info({ port: env.PORT }, 'api listening');
   });
 
-  // 5. Graceful shutdown.
-  const shutdown = async () => {
-    console.log('Shutting down...');
+  const shutdown = async (signal: string) => {
+    logger.info({ signal }, 'shutting down');
     server.close();
     await worker.close();
     await closeDb();
+    logger.info('shutdown complete');
     process.exit(0);
   };
-  process.on('SIGTERM', shutdown);
-  process.on('SIGINT', shutdown);
+
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch((err) => {
-  console.error('Failed to start API', err);
+  logger.fatal({ err }, 'failed to start api');
   process.exit(1);
 });

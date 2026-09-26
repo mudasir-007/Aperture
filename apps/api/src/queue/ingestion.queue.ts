@@ -1,4 +1,5 @@
 import { Queue, Worker, Job } from 'bullmq';
+import { logger } from '../logger';
 import IORedis from 'ioredis';
 import { env } from '../config/env';
 import { ingestDocument } from '../services/ingestion.service';

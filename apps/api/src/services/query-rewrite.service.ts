@@ -1,4 +1,5 @@
 import { env } from '../config/env';
+import { logger } from '../logger';
 import { getLLMProvider } from '../providers/llm';
 import { MessageRow } from '../repositories/message.repository';
 
