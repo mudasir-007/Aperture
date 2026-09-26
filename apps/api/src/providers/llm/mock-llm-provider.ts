@@ -1,9 +1,15 @@
-import { GenerateAnswerInput, GenerateAnswerResult, LLMProvider } from './llm-provider';
+import {
+  GenerateAnswerInput,
+  GenerateAnswerResult,
+  GenerateAnswerStream,
+  LLMProvider,
+} from './llm-provider';
 
 /**
  * Deterministic, dependency-free provider. Real extractive synthesis over
- * retrieved context, no external calls. `complete` returns a truncated
- * passthrough of the prompt as a stand-in summary.
+ * retrieved context, no external calls. Streaming yields the buffered
+ * answer one word at a time so the SSE path can be exercised end-to-end
+ * without an API key.
  */
 export class MockLLMProvider implements LLMProvider {
   readonly name = 'mock';
@@ -35,6 +41,23 @@ export class MockLLMProvider implements LLMProvider {
       answer,
       usedChunkIds: context.map((item) => item.chunkId),
     };
+  }
+
+  async *generateAnswerStream(
+    input: GenerateAnswerInput
+  ): GenerateAnswerStream {
+    const result = await this.generateAnswer(input);
+
+    // Yield the answer word-by-word. Include trailing whitespace on each
+    // word so concatenation reconstructs the exact original string.
+    const tokens = result.answer.match(/\S+\s*/g) ?? [];
+    for (const token of tokens) {
+      // Small delay so streaming is observable in local dev.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      yield token;
+    }
+
+    return result;
   }
 
   async complete(prompt: string, _systemPrompt: string): Promise<string> {

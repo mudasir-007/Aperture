@@ -16,25 +16,22 @@ export interface GenerateAnswerResult {
 }
 
 /**
- * Provider interface for the generation step (docs/architecture.md,
- * Section 24: keep the LLM behind an internal interface). Implementations
- * must not fabricate context -- the system prompt built in
- * generation.service.ts instructs the model to answer only from the
- * provided context and to say so explicitly when it can't.
+ * Streamed variant of GenerateAnswerResult. The generator yields text
+ * deltas as they arrive. When the stream ends, the generator's return
+ * value carries the final metadata (full answer, used chunk ids).
+ *
+ * If the underlying LLM has no native streaming (mock), the impl
+ * synthesizes deltas from the buffered response.
  */
-export interface LLMProvider {
-  readonly name: string;
-  generateAnswer(input: GenerateAnswerInput): Promise<GenerateAnswerResult>;
-}
-
-
+export type GenerateAnswerStream = AsyncGenerator<string, GenerateAnswerResult, void>;
 
 export interface LLMProvider {
   readonly name: string;
   generateAnswer(input: GenerateAnswerInput): Promise<GenerateAnswerResult>;
+  generateAnswerStream(input: GenerateAnswerInput): GenerateAnswerStream;
   /**
    * Generic text completion. Used for auxiliary tasks like conversation
-   * summarization where the structured RAG prompt shape doesn't apply.
+   * summarization and query rewriting.
    */
   complete(prompt: string, systemPrompt: string): Promise<string>;
 }
