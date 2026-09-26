@@ -8,6 +8,7 @@ import {
   UserRow,
 } from '../repositories/user.repository';
 import { createOrganization } from '../repositories/organization.repository';
+import { HttpError } from '../middleware/errorHandler';
 
 export interface AuthResult {
   token: string;
@@ -50,7 +51,7 @@ export async function registerUser(input: {
 }): Promise<AuthResult> {
   const existing = await findUserByEmail(input.email);
   if (existing) {
-    throw new Error('EMAIL_ALREADY_EXISTS');
+    throw new HttpError(409, 'An account with this email already exists.');
   }
 
   const organization = await createOrganization(input.organizationName);
@@ -76,12 +77,12 @@ export async function loginUser(input: {
 }): Promise<AuthResult> {
   const user = await findUserByEmail(input.email);
   if (!user) {
-    throw new Error('INVALID_CREDENTIALS');
+    throw new HttpError(401, 'Invalid email or password.');
   }
 
   const valid = await bcrypt.compare(input.password, user.password_hash);
   if (!valid) {
-    throw new Error('INVALID_CREDENTIALS');
+    throw new HttpError(401, 'Invalid email or password.');
   }
 
   return {
@@ -92,6 +93,6 @@ export async function loginUser(input: {
 
 export async function getCurrentUser(userId: string) {
   const user = await findUserById(userId);
-  if (!user) throw new Error('USER_NOT_FOUND');
+  if (!user) throw new HttpError(404, 'User not found.');
   return toPublicUser(user);
 }

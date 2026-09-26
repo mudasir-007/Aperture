@@ -3,7 +3,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { registerUser, loginUser, getCurrentUser } from '../services/auth.service';
 import { requireAuth, AuthedRequest } from '../middleware/auth';
-import { validate } from '../middleware/validate'; // Your custom middleware
+import { validate } from '../middleware/validate';
+import { rateLimitAuth } from '../middleware/rateLimit';
 
 const router = Router();
 
@@ -20,7 +21,7 @@ const loginSchema = z.object({
 });
 
 // Use the validate middleware here
-router.post('/register', validate(registerSchema), async (req, res, next) => {
+router.post('/register', rateLimitAuth, validate(registerSchema), async (req, res, next) => {
   try {
     const result = await registerUser(req.body); // req.body is now validated
     res.status(201).json(result);
@@ -29,7 +30,7 @@ router.post('/register', validate(registerSchema), async (req, res, next) => {
   }
 });
 
-router.post('/login', validate(loginSchema), async (req, res, next) => {
+router.post('/login', rateLimitAuth, validate(loginSchema), async (req, res, next) => {
   try {
     const result = await loginUser(req.body);
     res.json(result);
