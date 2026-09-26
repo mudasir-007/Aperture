@@ -28,7 +28,7 @@ services:
       retries: 5
 
   minio:
-    image: minio/minio:latest
+    image: quay.io/minio/minio:latest
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: minioadmin
@@ -39,21 +39,22 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 20s
 
   tika:
     image: apache/tika:latest
     ports:
       - "9998:9998"
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "-", "http://localhost:9998/tika"]
+      test: ["CMD-SHELL", "wget -q -O - http://localhost:9998/tika > /dev/null || exit 1"]
       interval: 10s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 10
+      start_period: 60s
 
 volumes:
   pgdata:
