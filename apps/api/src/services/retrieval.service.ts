@@ -1,5 +1,5 @@
 import { env } from '../config/env';
-import { findChunksForOrgByVector } from '../repositories/documentChunk.repository';
+import { hybridSearch } from '../repositories/documentChunk.repository';
 import { getEmbeddingProvider } from '../providers/embeddings';
 
 export interface RetrievedChunk {
@@ -18,7 +18,13 @@ export async function retrieveRelevantChunks(
   const embeddingProvider = getEmbeddingProvider();
   const [queryEmbedding] = await embeddingProvider.embed([query]);
 
-  const rows = await findChunksForOrgByVector(organizationId, queryEmbedding, topK);
+  const rows = await hybridSearch(
+    organizationId,
+    queryEmbedding,
+    query,
+    topK,
+    env.HYBRID_CANDIDATE_POOL
+  );
 
   return rows.map((row) => ({
     chunkId: row.id,

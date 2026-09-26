@@ -86,3 +86,84 @@ export async function findChunkById(id: string): Promise<DocumentChunkRow | unde
   );
   return result.rows[0];
 }
+
+
+
+/**
+ * Hybrid retrieval: dense (pgvector) + sparse (PostgreSQL full-text),
+ * fused with Reciprocal Rank Fusion (RRF).
+ *
+ * RRF formula: score(d) = 1/(k + rank_dense(d)) + 1/(k + rank_sparse(d))
+ * with k = 60 (standard value from Cormack et al., 2009).
+ *
+ * Both ranked lists are capped at `candidatePool` before fusion so the
+ * cost stays predictable regardless of index size.
+ */
+export async function hybridSearch(
+  organizationId: string,
+  queryEmbedding: number[],
+  queryText: string,
+  topK: number,
+  candidatePool: number
+): Promise<Array<DocumentChunkRow & { document_filename: string; score: number }>> {
+  const vectorLiteral = JSON.stringify(queryEmbedding);
+  const rrfK = 60;
+
+  const result = await query<any>(
+    `
+    WITH dense AS (
+      SELECT c.id,
+             ROW_NUMBER() OVER (ORDER BY c.embedding <=> $1::vector) AS rank
+      FROM document_chunks c
+      JOIN documents d ON d.id = c.document_id
+      WHERE d.organization_id = $2
+        AND d.status = 'ready'
+        AND c.embedding IS NOT NULL
+      ORDER BY c.embedding <=> $1::vector
+      LIMIT $3
+    ),
+    sparse AS (
+      SELECT c.id,
+             ROW_NUMBER() OVER (
+               ORDER BY ts_rank_cd(
+                 to_tsvector('english', c.content),
+                 plainto_tsquery('english', $4)
+               ) DESC
+             ) AS rank
+      FROM document_chunks c
+      JOIN documents d ON d.id = c.document_id
+      WHERE d.organization_id = $2
+        AND d.status = 'ready'
+        AND to_tsvector('english', c.content) @@ plainto_tsquery('english', $4)
+      ORDER BY ts_rank_cd(
+        to_tsvector('english', c.content),
+        plainto_tsquery('english', $4)
+      ) DESC
+      LIMIT $3
+    ),
+    fused AS (
+      SELECT
+        COALESCE(d.id, s.id) AS id,
+        COALESCE(1.0 / ($5 + d.rank), 0.0)
+          + COALESCE(1.0 / ($5 + s.rank), 0.0) AS rrf_score
+      FROM dense d
+      FULL OUTER JOIN sparse s ON d.id = s.id
+    )
+    SELECT c.id,
+           c.document_id,
+           c.content,
+           c.chunk_index,
+           c.created_at,
+           doc.filename AS document_filename,
+           f.rrf_score AS score
+    FROM fused f
+    JOIN document_chunks c ON c.id = f.id
+    JOIN documents doc ON doc.id = c.document_id
+    ORDER BY f.rrf_score DESC
+    LIMIT $6
+    `,
+    [vectorLiteral, organizationId, candidatePool, queryText, rrfK, topK]
+  );
+
+  return result.rows;
+}
