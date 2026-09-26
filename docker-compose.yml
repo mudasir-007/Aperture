@@ -1,53 +1,35 @@
-# Docker Compose for the RAG Chat Application (MVP scope).
-#
-# This brings up the API (with its SQLite data file on a named volume) and
-# the web frontend served via nginx. There is no separate database
-# container because the MVP data layer is SQLite-on-disk (see
-# docs/architecture.md's note in apps/api/src/db/schema.sql) -- swapping to
-# Postgres+pgvector at the documented scale trigger would add a `db`
-# service here and change apps/api's DB_FILE-based config to a connection
-# string.
-
 services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: rag_chat
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api:
     build:
       context: .
       dockerfile: infra/Dockerfile.api
-    ports:
-      - '4000:4000'
     environment:
-      PORT: 4000
-      NODE_ENV: production
-      DB_FILE: /app/data/prod.db
-      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in your .env file before running compose}
-      JWT_EXPIRES_IN: 1d
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/rag_chat
+      JWT_SECRET: ${JWT_SECRET}
       EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-mock}
       LLM_PROVIDER: ${LLM_PROVIDER:-mock}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
-      OPENAI_CHAT_MODEL: ${OPENAI_CHAT_MODEL:-gpt-4o-mini}
-      CHUNK_SIZE_CHARS: ${CHUNK_SIZE_CHARS:-800}
-      CHUNK_OVERLAP_CHARS: ${CHUNK_OVERLAP_CHARS:-120}
-      RETRIEVAL_TOP_K: ${RETRIEVAL_TOP_K:-5}
-      WEB_ORIGIN: http://localhost:8080
-    volumes:
-      - api-data:/app/data
-    healthcheck:
-      test: ['CMD', 'node', '-e', "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-
-  web:
-    build:
-      context: .
-      dockerfile: infra/Dockerfile.web
-      args:
-        VITE_API_BASE_URL: /api
     ports:
-      - '8080:80'
+      - "4000:4000"
     depends_on:
-      - api
+      postgres:
+        condition: service_healthy
 
 volumes:
-  api-data:
+  pgdata:
