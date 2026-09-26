@@ -29,6 +29,8 @@ const envSchema = z.object({
   RERANK_TOP_K: z.coerce.number().default(5),
   HISTORY_RECENT_MESSAGES: z.coerce.number().default(12),
   HISTORY_SUMMARY_MIN_MESSAGES: z.coerce.number().default(6),
+  QUERY_REWRITE_ENABLED: z.coerce.boolean().default(true),
+  QUERY_REWRITE_MIN_HISTORY: z.coerce.number().default(2),
 });
 
 export const env = envSchema.parse(process.env);

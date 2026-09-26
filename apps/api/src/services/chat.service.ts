@@ -1,6 +1,7 @@
 import { getLLMProvider } from '../providers/llm';
 import { retrieveRelevantChunks } from './retrieval.service';
 import { buildConversationContext } from './history.service';
+import { rewriteQuery } from './query-rewrite.service';
 import {
   createConversation,
   findConversationByIdForUser,
@@ -23,6 +24,8 @@ export interface ChatResult {
     content: string;
     score: number;
   }>;
+  /** The query actually used for retrieval (may differ from the user's text). */
+  rewrittenQuery: string;
 }
 
 export async function chat(input: {
@@ -47,24 +50,33 @@ export async function chat(input: {
   // 2. Load prior messages.
   const priorMessages = await listMessagesForConversation(conversation.id);
 
-  // 3. Build context (may trigger summarization of older messages).
+  // 3. Build summarized context for the LLM (Batch 7).
   const { summary, recentMessages } = await buildConversationContext(
     conversation,
     priorMessages
   );
 
-  // 4. Persist this user's new message.
+  // 4. Persist the user's actual message (unchanged).
   await createMessage({
     conversationId: conversation.id,
     role: 'user',
     content: input.query,
   });
 
-  // 5. Retrieve context from the org's documents.
-  const chunks = await retrieveRelevantChunks(input.organizationId, input.query);
+  // 5. Rewrite the query for retrieval (Batch 8).
+  //    Uses prior history, not the just-persisted user turn.
+  const rewrittenQuery = await rewriteQuery({
+    latestQuery: input.query,
+    history: priorMessages,
+  });
 
-  // 6. Assemble the conversation history passed to the LLM.
-  //    Summary (if any) goes in as the first assistant turn with a marker.
+  // 6. Retrieve using the rewritten query.
+  const chunks = await retrieveRelevantChunks(
+    input.organizationId,
+    rewrittenQuery
+  );
+
+  // 7. Assemble conversation history for the LLM.
   const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
   if (summary) {
     conversationHistory.push({
@@ -79,7 +91,9 @@ export async function chat(input: {
     });
   }
 
-  // 7. Generate the answer.
+  // 8. Generate using the ORIGINAL user query as the question.
+  //    The LLM should answer what the user actually asked, not the
+  //    rewritten search query.
   const llm = getLLMProvider();
   const generationResult = await llm.generateAnswer({
     question: input.query,
@@ -91,14 +105,14 @@ export async function chat(input: {
     conversationHistory,
   });
 
-  // 8. Persist assistant message.
+  // 9. Persist assistant message.
   const assistantMessage = await createMessage({
     conversationId: conversation.id,
     role: 'assistant',
     content: generationResult.answer,
   });
 
-  // 9. Persist citations for the chunks the LLM actually used.
+  // 10. Persist citations for used chunks.
   const usedChunks = chunks.filter((c) =>
     generationResult.usedChunkIds.includes(c.chunkId)
   );
@@ -117,5 +131,6 @@ export async function chat(input: {
     conversationId: conversation.id,
     answer: generationResult.answer,
     citations: usedChunks,
+    rewrittenQuery,
   };
 }
