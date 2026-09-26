@@ -14,16 +14,16 @@ export async function uploadDocument(input: {
   filename: string;
   mimeType: string;
   sizeBytes: number;
-  buffer: Buffer;
+  s3Key: string;
 }): Promise<DocumentRow> {
-  const doc = await createDocument({
+  return createDocument({
     organizationId: input.organizationId,
     ownerId: input.ownerId,
     filename: input.filename,
     mimeType: input.mimeType,
     sizeBytes: input.sizeBytes,
+    s3Key: input.s3Key,
   });
-  return doc;
 }
 
 export async function listDocuments(organizationId: string): Promise<DocumentRow[]> {

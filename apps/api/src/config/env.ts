@@ -17,6 +17,11 @@ const envSchema = z.object({
   CHUNK_SIZE_CHARS: z.coerce.number().default(800),
   CHUNK_OVERLAP_CHARS: z.coerce.number().default(120),
   REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
+  S3_ENDPOINT: z.string().default('http://localhost:9000'),
+  S3_REGION: z.string().default('us-east-1'),
+  S3_ACCESS_KEY: z.string().default('minioadmin'),
+  S3_SECRET_KEY: z.string().default('minioadmin'),
+  S3_BUCKET: z.string().default('aperture-documents'),
 });
 
 export const env = envSchema.parse(process.env);

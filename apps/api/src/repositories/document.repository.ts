@@ -7,6 +7,7 @@ export interface DocumentRow {
   filename: string;
   mime_type: string;
   size_bytes: number;
+  s3_key: string | null;
   status: string;
   error_message: string | null;
   created_at: Date;
@@ -19,12 +20,21 @@ export async function createDocument(data: {
   filename: string;
   mimeType: string;
   sizeBytes: number;
+  s3Key: string;
 }): Promise<DocumentRow> {
   const result = await query<DocumentRow>(
-    `INSERT INTO documents (organization_id, owner_id, filename, mime_type, size_bytes, status)
-     VALUES ($1, $2, $3, $4, $5, 'processing')
+    `INSERT INTO documents
+       (organization_id, owner_id, filename, mime_type, size_bytes, status, s3_key)
+     VALUES ($1, $2, $3, $4, $5, 'processing', $6)
      RETURNING *`,
-    [data.organizationId, data.ownerId, data.filename, data.mimeType, data.sizeBytes]
+    [
+      data.organizationId,
+      data.ownerId,
+      data.filename,
+      data.mimeType,
+      data.sizeBytes,
+      data.s3Key,
+    ]
   );
   return result.rows[0];
 }
@@ -61,6 +71,7 @@ export async function findDocumentsByOrg(organizationId: string): Promise<Docume
 export async function deleteDocument(id: string): Promise<void> {
   await query('DELETE FROM documents WHERE id = $1', [id]);
 }
+
 export async function findDocumentByIdForOrg(
   id: string,
   organizationId: string
@@ -81,4 +92,3 @@ export async function listDocumentsForOrg(
   );
   return result.rows;
 }
-

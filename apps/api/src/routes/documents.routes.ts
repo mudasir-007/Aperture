@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import multer from 'multer';
+import crypto from 'crypto';
+import path from 'path';
 import { requireAuth, AuthedRequest } from '../middleware/auth';
 import {
   uploadDocument,
@@ -8,10 +10,11 @@ import {
   removeDocument,
 } from '../services/document.service';
 import { enqueueIngestion } from '../queue/ingestion.queue';
+import { uploadObject } from '../storage/s3.client';
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 },
 });
 
 const router = Router();
@@ -21,29 +24,35 @@ router.post('/upload', upload.single('file'), async (req: AuthedRequest, res, ne
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
+    const orgId = req.user!.organizationId;
+    const userId = req.user!.userId;
+
+    // Build a deterministic-ish, collision-free S3 key.
+    const ext = path.extname(req.file.originalname);
+    const key = `orgs/${orgId}/documents/${crypto.randomUUID()}${ext}`;
+
+    // 1. Upload bytes to object storage.
+    await uploadObject(key, req.file.buffer, req.file.mimetype);
+
+    // 2. Create the DB row with the S3 key and status 'processing'.
     const doc = await uploadDocument({
-      organizationId: req.user!.organizationId,
-      ownerId: req.user!.userId,
+      organizationId: orgId,
+      ownerId: userId,
       filename: req.file.originalname,
       mimeType: req.file.mimetype,
       sizeBytes: req.file.size,
-      buffer: req.file.buffer,
+      s3Key: key,
     });
 
-    const rawText = req.file.buffer.toString('utf-8');
-
-    // Enqueue instead of awaiting — returns immediately with status 'processing'.
+    // 3. Enqueue. Job payload contains only the reference, not the bytes.
     const jobId = await enqueueIngestion({
       documentId: doc.id,
-      organizationId: req.user!.organizationId,
-      rawText,
+      organizationId: orgId,
+      s3Key: key,
+      mimeType: req.file.mimetype,
     });
 
-    res.status(202).json({
-      document: doc,
-      jobId,
-      status: 'processing',
-    });
+    res.status(202).json({ document: doc, jobId, status: 'processing' });
   } catch (err) {
     next(err);
   }

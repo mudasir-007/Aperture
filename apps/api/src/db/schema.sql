@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'member',
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  s3_key TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
