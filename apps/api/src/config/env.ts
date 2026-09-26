@@ -24,6 +24,9 @@ const envSchema = z.object({
   S3_BUCKET: z.string().default('aperture-documents'),
   TIKA_URL: z.string().default('http://localhost:9998'),
   HYBRID_CANDIDATE_POOL: z.coerce.number().default(100),
+  RERANKER_PROVIDER: z.enum(['mock', 'local', 'cohere']).default('mock'),
+  RERANKER_MODEL: z.string().default('Xenova/bge-reranker-base'),
+  RERANK_TOP_K: z.coerce.number().default(5),
 });
 
 export const env = envSchema.parse(process.env);

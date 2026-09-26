@@ -87,8 +87,6 @@ export async function findChunkById(id: string): Promise<DocumentChunkRow | unde
   return result.rows[0];
 }
 
-
-
 /**
  * Hybrid retrieval: dense (pgvector) + sparse (PostgreSQL full-text),
  * fused with Reciprocal Rank Fusion (RRF).
@@ -97,13 +95,14 @@ export async function findChunkById(id: string): Promise<DocumentChunkRow | unde
  * with k = 60 (standard value from Cormack et al., 2009).
  *
  * Both ranked lists are capped at `candidatePool` before fusion so the
- * cost stays predictable regardless of index size.
+ * cost stays predictable regardless of index size. The function returns
+ * up to `candidatePool` fused results; the caller is expected to slice
+ * to its own top-K after reranking.
  */
 export async function hybridSearch(
   organizationId: string,
   queryEmbedding: number[],
   queryText: string,
-  topK: number,
   candidatePool: number
 ): Promise<Array<DocumentChunkRow & { document_filename: string; score: number }>> {
   const vectorLiteral = JSON.stringify(queryEmbedding);
@@ -162,7 +161,7 @@ export async function hybridSearch(
     ORDER BY f.rrf_score DESC
     LIMIT $6
     `,
-    [vectorLiteral, organizationId, candidatePool, queryText, rrfK, topK]
+    [vectorLiteral, organizationId, candidatePool, queryText, rrfK, candidatePool]
   );
 
   return result.rows;
