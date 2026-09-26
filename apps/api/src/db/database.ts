@@ -1,46 +1,64 @@
+import { Pool, PoolClient } from 'pg';
 import fs from 'fs';
 import path from 'path';
-import Database from 'better-sqlite3';
 import { env } from '../config/env';
 
-let dbInstance: Database.Database | null = null;
+let pool: Pool | null = null;
 
-function resolveDbFile(): string {
-  // ":memory:" is honored for potential future fast unit-test use; the
-  // integration test suite uses a real file (see package.json "pretest"/
-  // "test" scripts) so state is inspectable across the run.
-  if (env.DB_FILE === ':memory:') {
-    return env.DB_FILE;
-  }
-  const resolved = path.isAbsolute(env.DB_FILE) ? env.DB_FILE : path.join(process.cwd(), env.DB_FILE);
-  fs.mkdirSync(path.dirname(resolved), { recursive: true });
-  return resolved;
+export function getPool(): Pool {
+  if (pool) return pool;
+  pool = new Pool({
+    connectionString: env.DATABASE_URL,
+    max: 20,
+    idleTimeoutMillis: 30_000,
+    connectionTimeoutMillis: 5_000,
+  });
+  pool.on('error', (err) => {
+    console.error('Unexpected error on idle PostgreSQL client', err);
+  });
+  return pool;
 }
 
-export function getDb(): Database.Database {
-  if (dbInstance) {
-    return dbInstance;
+export async function query<T = any>(
+  text: string,
+  params?: any[]
+): Promise<{ rows: T[]; rowCount: number }> {
+  return getPool().query(text, params);
+}
+
+export async function withTransaction<T>(
+  fn: (client: PoolClient) => Promise<T>
+): Promise<T> {
+  const client = await getPool().connect();
+  try {
+    await client.query('BEGIN');
+    const result = await fn(client);
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    await client.query('ROLLBACK');
+    throw e;
+  } finally {
+    client.release();
   }
+}
 
-  dbInstance = new Database(resolveDbFile());
-  dbInstance.pragma('foreign_keys = ON'); // required per-connection for ON DELETE CASCADE to take effect
-  dbInstance.pragma('journal_mode = WAL');
-
+/** Apply schema.sql idempotently. */
+export async function initDb(): Promise<void> {
   const schemaPath = path.join(__dirname, 'schema.sql');
   const schema = fs.readFileSync(schemaPath, 'utf-8');
-  dbInstance.exec(schema);
-
-  return dbInstance;
+  await getPool().query(schema);
 }
 
-export function closeDb(): void {
-  if (dbInstance) {
-    dbInstance.close();
-    dbInstance = null;
+export async function closeDb(): Promise<void> {
+  if (pool) {
+    await pool.end();
+    pool = null;
   }
 }
 
-/** Deterministic-enough, dependency-free id generator: "<prefix>_<uuid>". */
 export function generateId(prefix: string): string {
+  // PostgreSQL uses gen_random_uuid() by default; this is kept for
+  // callers that want a prefixed ID string (e.g. "chk_<uuid>").
   return `${prefix}_${globalThis.crypto.randomUUID()}`;
 }
