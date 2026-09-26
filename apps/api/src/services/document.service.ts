@@ -10,6 +10,7 @@ import {
 import { countChunksForDocument } from '../repositories/documentChunk.repository';
 import { deletePrefix, deleteObject } from '../storage/s3.client';
 import { logger } from '../logger';
+import { HttpError } from '../middleware/errorHandler';
 
 export async function uploadDocument(input: {
   organizationId: string;
@@ -38,8 +39,8 @@ export async function getDocument(
   organizationId: string
 ): Promise<DocumentRow & { chunkCount: number }> {
   const doc = await findDocumentById(documentId);
-  if (!doc) throw new Error('DOCUMENT_NOT_FOUND');
-  if (doc.organization_id !== organizationId) throw new Error('FORBIDDEN');
+  if (!doc) throw new HttpError(404, 'Document not found.');
+  if (doc.organization_id !== organizationId) throw new HttpError(403, 'Access denied.');
 
   const chunkCount = await countChunksForDocument(doc.id);
   return { ...doc, chunkCount };
@@ -50,8 +51,8 @@ export async function removeDocument(
   organizationId: string
 ): Promise<void> {
   const doc = await findDocumentById(documentId);
-  if (!doc) throw new Error('DOCUMENT_NOT_FOUND');
-  if (doc.organization_id !== organizationId) throw new Error('FORBIDDEN');
+  if (!doc) throw new HttpError(404, 'Document not found.');
+  if (doc.organization_id !== organizationId) throw new HttpError(403, 'Access denied.');
 
   const s3Key = await findDocumentS3Key(documentId, organizationId);
 

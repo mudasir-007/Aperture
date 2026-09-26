@@ -3,6 +3,7 @@ import { logger } from '../logger';
 import IORedis from 'ioredis';
 import { env } from '../config/env';
 import { ingestDocument } from '../services/ingestion.service';
+import { markDocumentFailed } from '../services/document.service';
 import { downloadObject } from '../storage/s3.client';
 import { extractText } from '../parsing/tika.client';
 
@@ -41,31 +42,44 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
     INGESTION_QUEUE_NAME,
     async (job: Job<IngestionJobData>) => {
       const { documentId, s3Key, mimeType } = job.data;
-      await job.updateProgress(10);
+      try {
+        await job.updateProgress(10);
 
-      // 1. Download raw bytes from S3.
-      const buffer = await downloadObject(s3Key);
-      await job.updateProgress(30);
+        // 1. Download raw bytes from S3.
+        const buffer = await downloadObject(s3Key);
+        await job.updateProgress(30);
 
-      // 2. Extract text via Tika (handles PDF, DOCX, CSV, XLSX, etc.).
-      const rawText = await extractText(buffer, mimeType);
-      await job.updateProgress(50);
+        // 2. Extract text via Tika (handles PDF, DOCX, CSV, XLSX, etc.).
+        const rawText = await extractText(buffer, mimeType);
+        await job.updateProgress(50);
 
-      // 3. Chunk + embed + index.
-      const result = await ingestDocument(documentId, rawText);
-      await job.updateProgress(100);
-      return result;
+        // 3. Chunk + embed + index (markDocumentReady called inside).
+        const result = await ingestDocument(documentId, rawText);
+        await job.updateProgress(100);
+        return result;
+      } catch (err) {
+        // Always persist failure to the DB so the document never gets stuck
+        // at status='processing'. ingestDocument already calls markDocumentFailed
+        // for its own errors, but S3/Tika errors above would bypass that.
+        const message = err instanceof Error ? err.message : 'Unknown ingestion error';
+        try {
+          await markDocumentFailed(documentId, message);
+        } catch (dbErr) {
+          logger.error({ err: dbErr, documentId }, 'failed to mark document as failed');
+        }
+        throw err; // re-throw so BullMQ records the job as failed
+      }
     },
     { connection, concurrency: 3 }
   );
 
   worker.on('completed', (job) => {
-    console.log(`[ingestion] completed job ${job.id} (documentId=${job.data.documentId})`);
+    logger.info({ jobId: job.id, documentId: job.data.documentId }, '[ingestion] job completed');
   });
   worker.on('failed', (job, err) => {
-    console.error(
-      `[ingestion] failed job ${job?.id} (documentId=${job?.data.documentId}):`,
-      err.message
+    logger.error(
+      { jobId: job?.id, documentId: job?.data.documentId, err: err.message },
+      '[ingestion] job failed'
     );
   });
 
