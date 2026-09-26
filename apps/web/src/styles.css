@@ -1,0 +1,313 @@
+:root {
+  --border: #e2e2e7;
+  --bg: #fafafa;
+  --primary: #2f6feb;
+  --danger: #c0392b;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #1a1a1a;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+.top-bar {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 12px 24px;
+  background: white;
+  border-bottom: 1px solid var(--border);
+}
+
+.top-bar .brand {
+  font-weight: 700;
+}
+
+.top-bar nav {
+  display: flex;
+  gap: 16px;
+  flex: 1;
+}
+
+.top-bar nav a {
+  color: #555;
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.top-bar nav a.active {
+  background: #eef3ff;
+  color: var(--primary);
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #555;
+}
+
+.app-body {
+  flex: 1;
+  display: flex;
+}
+
+.page {
+  padding: 24px;
+  max-width: 900px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+.hint {
+  color: #666;
+  font-size: 0.9rem;
+}
+
+/* Auth page */
+.auth-page {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 320px;
+  padding: 32px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.auth-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.auth-form input {
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  border-radius: 6px;
+  padding: 10px 14px;
+  background: var(--primary);
+  color: white;
+  font-size: 0.95rem;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.link-button {
+  background: none;
+  color: var(--primary);
+  padding: 4px;
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 0.9rem;
+}
+
+.error-text.small {
+  font-size: 0.8rem;
+  margin-top: 4px;
+}
+
+.empty-state {
+  color: #777;
+}
+
+.empty-state.small {
+  font-size: 0.85rem;
+  padding: 12px;
+}
+
+/* Documents page */
+.upload-row {
+  margin: 16px 0;
+}
+
+.upload-button {
+  display: inline-block;
+  background: var(--primary);
+  color: white;
+  padding: 10px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.documents-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.documents-table th,
+.documents-table td {
+  text-align: left;
+  padding: 10px;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+}
+
+.status-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  text-transform: capitalize;
+}
+
+.status-ready {
+  background: #e3f8e8;
+  color: #1e7e34;
+}
+
+.status-processing {
+  background: #fff6db;
+  color: #8a6d00;
+}
+
+.status-failed {
+  background: #fde3e3;
+  color: var(--danger);
+}
+
+/* Chat page */
+.chat-layout {
+  display: flex;
+  flex: 1;
+  width: 100%;
+}
+
+.conversation-list {
+  width: 260px;
+  border-right: 1px solid var(--border);
+  background: white;
+  padding: 16px;
+}
+
+.new-conversation-button {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.conversation-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.conversation-item {
+  width: 100%;
+  text-align: left;
+  background: none;
+  color: #333;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+}
+
+.conversation-item.active {
+  background: #eef3ff;
+  color: var(--primary);
+}
+
+.chat-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  max-width: 800px;
+}
+
+.message-list {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  margin-bottom: 16px;
+}
+
+.message {
+  padding: 12px 16px;
+  border-radius: 10px;
+  max-width: 90%;
+}
+
+.message-user {
+  align-self: flex-end;
+  background: var(--primary);
+  color: white;
+}
+
+.message-assistant {
+  align-self: flex-start;
+  background: white;
+  border: 1px solid var(--border);
+  white-space: pre-wrap;
+}
+
+.citations {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: #555;
+}
+
+.citations ul {
+  padding-left: 16px;
+  margin: 6px 0 0;
+}
+
+.citation-filename {
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.citation-snippet {
+  color: #777;
+}
+
+.message-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.message-input-row input {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 1rem;
+}
