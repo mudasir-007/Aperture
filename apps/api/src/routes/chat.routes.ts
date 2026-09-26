@@ -64,6 +64,7 @@ router.post('/stream', async (req: AuthedRequest, res, next) => {
         if (clientClosed) break;
         res.write(`event: ${event.type}\n`);
         res.write(`data: ${JSON.stringify(event)}\n\n`);
+        (res as any).flush?.();
       }
     } catch (streamErr) {
       // Mid-stream failure: report it as an SSE error event.
@@ -72,6 +73,7 @@ router.post('/stream', async (req: AuthedRequest, res, next) => {
         streamErr instanceof Error ? streamErr.message : 'Stream failed';
       res.write(`event: error\n`);
       res.write(`data: ${JSON.stringify({ type: 'error', message })}\n\n`);
+      (res as any).flush?.();
     } finally {
       res.end();
     }

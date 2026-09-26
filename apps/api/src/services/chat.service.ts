@@ -38,7 +38,8 @@ export type ChatStreamEvent =
   | { type: 'meta'; conversationId: string; rewrittenQuery: string }
   | { type: 'token'; text: string }
   | { type: 'citations'; citations: ChatCitation[] }
-  | { type: 'done'; messageId: string };
+  | { type: 'done'; messageId: string }
+  | { type: 'error'; message: string };  // ← add this
 
 // ─── Shared preparation ─────────────────────────────────────────────────────
 

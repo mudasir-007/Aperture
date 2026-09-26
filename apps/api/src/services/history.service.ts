@@ -42,6 +42,13 @@ export async function buildConversationContext(
   const recentMessages = messages.slice(splitIndex);
   const newestOlderId = olderMessages[olderMessages.length - 1]?.id;
 
+  // Defensive guard: if we can't identify the last "older" message, we
+  // can't advance the summary pointer safely. Return the existing state
+  // rather than risk persisting a NULL pointer via updateConversationSummary.
+  if (!newestOlderId) {
+    return { summary: conversation.summary, recentMessages };
+  }
+
   // Already summarized up to the newest "old" message — nothing to do.
   if (conversation.summary_through_message_id === newestOlderId) {
     return { summary: conversation.summary, recentMessages };
