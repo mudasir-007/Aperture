@@ -1,43 +1,33 @@
-import { NextFunction, Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 
-export class HttpError extends Error {
-  constructor(public status: number, message: string) {
-    super(message);
-  }
-}
+const STATUS_MAP: Record<string, number> = {
+  EMAIL_ALREADY_EXISTS: 409,
+  INVALID_CREDENTIALS: 401,
+  USER_NOT_FOUND: 404,
+  DOCUMENT_NOT_FOUND: 404,
+  CONVERSATION_NOT_FOUND: 404,
+  FORBIDDEN: 403,
+};
 
-interface SqliteError extends Error {
-  code?: string;
-}
-
-function isSqliteConstraintError(err: unknown): err is SqliteError {
-  return err instanceof Error && typeof (err as SqliteError).code === 'string' && (err as SqliteError).code!.startsWith('SQLITE_CONSTRAINT');
-}
-
-/**
- * Central error handler: logs full detail server-side, returns a
- * consistent, non-leaky error envelope to clients (docs/architecture.md
- * Section 12).
- */
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export function errorHandler(err: unknown, req: Request, res: Response, next: NextFunction): void {
-  if (err instanceof HttpError) {
-    res.status(err.status).json({ error: { message: err.message } });
+export function errorHandler(
+  err: unknown,
+  _req: Request,
+  res: Response,
+  _next: NextFunction
+): void {
+  if (err instanceof ZodError) {
+    res.status(400).json({ error: 'Validation failed', details: err.errors });
     return;
   }
 
-  if (isSqliteConstraintError(err)) {
-    // eslint-disable-next-line no-console
-    console.error('Database constraint error:', err.code, err.message);
-    res.status(409).json({ error: { message: 'A data consistency error occurred.' } });
-    return;
+  const message = err instanceof Error ? err.message : 'Internal server error';
+  const status = STATUS_MAP[message] ?? 500;
+
+  if (status === 500) {
+    // Log the full error server-side but don't leak internals to the client.
+    console.error('[error]', err);
   }
 
-  // eslint-disable-next-line no-console
-  console.error('Unhandled error:', err);
-  res.status(500).json({ error: { message: 'An unexpected error occurred.' } });
-}
-
-export function notFoundHandler(req: Request, res: Response): void {
-  res.status(404).json({ error: { message: `Route not found: ${req.method} ${req.path}` } });
+  res.status(status).json({ error: message });
 }
