@@ -4,6 +4,8 @@ import authRoutes from './routes/auth.routes';
 import documentRoutes from './routes/documents.routes';
 import chatRoutes from './routes/chat.routes';
 import healthRoutes from './routes/health.routes';
+import conversationRoutes from './routes/conversations.routes';
+
 
 export function createApp() {
   const app = express();
@@ -13,6 +15,7 @@ export function createApp() {
   app.use('/api/v1/auth', authRoutes);
   app.use('/api/v1/documents', documentRoutes);
   app.use('/api/v1/chat', chatRoutes);
+  app.use('/api/v1/conversations', conversationRoutes);
 
   app.use(errorHandler);
   return app;

@@ -54,14 +54,6 @@ export async function listCitationsForMessages(
   return map;
 }
 
-export async function createMessageCompat(
-  conversationId: string,
-  role: string,
-  content: string
-): Promise<MessageRow> {
-  return createMessage({ conversationId, role, content });
-}
-
 export async function createCitations(
   messageId: string,
   citations: Array<{ documentChunkId: string; snippet: string; score: number }>
