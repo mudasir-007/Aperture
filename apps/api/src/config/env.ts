@@ -16,6 +16,7 @@ const envSchema = z.object({
   RETRIEVAL_TOP_K: z.coerce.number().default(5),
   CHUNK_SIZE_CHARS: z.coerce.number().default(800),
   CHUNK_OVERLAP_CHARS: z.coerce.number().default(120),
+  REDIS_URL: z.string().min(1).default('redis://localhost:6379'),
 });
 
 export const env = envSchema.parse(process.env);

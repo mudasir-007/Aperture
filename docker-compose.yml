@@ -15,21 +15,15 @@ services:
       timeout: 5s
       retries: 5
 
-  api:
-    build:
-      context: .
-      dockerfile: infra/Dockerfile.api
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/rag_chat
-      JWT_SECRET: ${JWT_SECRET}
-      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-mock}
-      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  redis:
+    image: redis:7-alpine
     ports:
-      - "4000:4000"
-    depends_on:
-      postgres:
-        condition: service_healthy
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   pgdata:

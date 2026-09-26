@@ -7,7 +7,7 @@ import {
   getDocument,
   removeDocument,
 } from '../services/document.service';
-import { ingestDocument } from '../services/ingestion.service';
+import { enqueueIngestion } from '../queue/ingestion.queue';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -31,17 +31,19 @@ router.post('/upload', upload.single('file'), async (req: AuthedRequest, res, ne
     });
 
     const rawText = req.file.buffer.toString('utf-8');
-    // Fire and await: ingestion is currently synchronous.
-    // This will move to a queue in the next phase.
-    try {
-      await ingestDocument(doc.id, rawText);
-    } catch (ingestErr) {
-      // Document is already marked failed by ingestion.service.
-      // Still return the created document so the client can see the status.
-    }
 
-    const fresh = await getDocument(doc.id, req.user!.organizationId);
-    res.status(201).json(fresh);
+    // Enqueue instead of awaiting — returns immediately with status 'processing'.
+    const jobId = await enqueueIngestion({
+      documentId: doc.id,
+      organizationId: req.user!.organizationId,
+      rawText,
+    });
+
+    res.status(202).json({
+      document: doc,
+      jobId,
+      status: 'processing',
+    });
   } catch (err) {
     next(err);
   }
