@@ -92,3 +92,20 @@ export async function listDocumentsForOrg(
   );
   return result.rows;
 }
+
+
+/**
+ * Returns the S3 key for a document before it is deleted. Used by the
+ * deletion service so we can clean up object storage after the DB row
+ * (and its cascading chunks/citations) is removed.
+ */
+export async function findDocumentS3Key(
+  id: string,
+  organizationId: string
+): Promise<string | null> {
+  const result = await query<{ s3_key: string | null }>(
+    'SELECT s3_key FROM documents WHERE id = $1 AND organization_id = $2',
+    [id, organizationId]
+  );
+  return result.rows[0]?.s3_key ?? null;
+}
