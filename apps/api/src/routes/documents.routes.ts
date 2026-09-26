@@ -12,9 +12,24 @@ import {
 import { enqueueIngestion } from '../queue/ingestion.queue';
 import { uploadObject } from '../storage/s3.client';
 
+// Formats Tika can parse. Add more as needed.
+const ALLOWED_MIME_TYPES = new Set([
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'text/html',
+  'application/pdf',
+  'application/msword',                                                          // .doc
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',     // .docx
+  'application/vnd.ms-excel',                                                    // .xls
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',           // .xlsx
+  'application/vnd.ms-powerpoint',                                               // .ppt
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',   // .pptx
+]);
+
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20 MB cap
 });
 
 const router = Router();
@@ -24,17 +39,23 @@ router.post('/upload', upload.single('file'), async (req: AuthedRequest, res, ne
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
+    if (!ALLOWED_MIME_TYPES.has(req.file.mimetype)) {
+      return res.status(415).json({
+        error: `Unsupported file type: ${req.file.mimetype}`,
+        allowed: Array.from(ALLOWED_MIME_TYPES),
+      });
+    }
+
     const orgId = req.user!.organizationId;
     const userId = req.user!.userId;
 
-    // Build a deterministic-ish, collision-free S3 key.
     const ext = path.extname(req.file.originalname);
     const key = `orgs/${orgId}/documents/${crypto.randomUUID()}${ext}`;
 
-    // 1. Upload bytes to object storage.
+    // 1. Upload to S3.
     await uploadObject(key, req.file.buffer, req.file.mimetype);
 
-    // 2. Create the DB row with the S3 key and status 'processing'.
+    // 2. Create DB row (status='processing').
     const doc = await uploadDocument({
       organizationId: orgId,
       ownerId: userId,
@@ -44,7 +65,7 @@ router.post('/upload', upload.single('file'), async (req: AuthedRequest, res, ne
       s3Key: key,
     });
 
-    // 3. Enqueue. Job payload contains only the reference, not the bytes.
+    // 3. Enqueue. Worker will fetch from S3 and run it through Tika.
     const jobId = await enqueueIngestion({
       documentId: doc.id,
       organizationId: orgId,

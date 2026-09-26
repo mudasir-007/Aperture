@@ -22,6 +22,7 @@ const envSchema = z.object({
   S3_ACCESS_KEY: z.string().default('minioadmin'),
   S3_SECRET_KEY: z.string().default('minioadmin'),
   S3_BUCKET: z.string().default('aperture-documents'),
+  TIKA_URL: z.string().default('http://localhost:9998'),
 });
 
 export const env = envSchema.parse(process.env);

@@ -3,6 +3,7 @@ import IORedis from 'ioredis';
 import { env } from '../config/env';
 import { ingestDocument } from '../services/ingestion.service';
 import { downloadObject } from '../storage/s3.client';
+import { extractText } from '../parsing/tika.client';
 
 export const INGESTION_QUEUE_NAME = 'document-ingestion';
 
@@ -38,14 +39,18 @@ export function startIngestionWorker(): Worker<IngestionJobData> {
   const worker = new Worker<IngestionJobData>(
     INGESTION_QUEUE_NAME,
     async (job: Job<IngestionJobData>) => {
-      const { documentId, s3Key } = job.data;
+      const { documentId, s3Key, mimeType } = job.data;
       await job.updateProgress(10);
 
-      // Download raw bytes from S3, then hand to the ingestion service.
+      // 1. Download raw bytes from S3.
       const buffer = await downloadObject(s3Key);
-      const rawText = buffer.toString('utf-8');
-
       await job.updateProgress(30);
+
+      // 2. Extract text via Tika (handles PDF, DOCX, CSV, XLSX, etc.).
+      const rawText = await extractText(buffer, mimeType);
+      await job.updateProgress(50);
+
+      // 3. Chunk + embed + index.
       const result = await ingestDocument(documentId, rawText);
       await job.updateProgress(100);
       return result;
