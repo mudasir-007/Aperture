@@ -1,6 +1,6 @@
 import { EmbeddingProvider } from './embedding-provider';
 
-const DIMENSIONS = 128;
+const DIMENSIONS = 1536;  // Must match schema.sql: embedding vector(1536)
 
 /**
  * Deterministic, dependency-free embedding via feature hashing (a real,
