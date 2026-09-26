@@ -7,6 +7,7 @@ import {
   getConversationWithMessages,
   removeConversation,
 } from '../services/conversation.service';
+import { rateLimitChat } from '../middleware/rateLimit';
 
 const router = Router();
 router.use(requireAuth);
@@ -18,7 +19,7 @@ const chatSchema = z.object({
 
 // ─── Buffered chat ─────────────────────────────────────────────────────────
 
-router.post('/', async (req: AuthedRequest, res, next) => {
+router.post('/', rateLimitChat, async (req: AuthedRequest, res, next) => {
   try {
     const input = chatSchema.parse(req.body);
     const result = await chat({
@@ -35,7 +36,7 @@ router.post('/', async (req: AuthedRequest, res, next) => {
 
 // ─── Streaming chat (SSE) ──────────────────────────────────────────────────
 
-router.post('/stream', async (req: AuthedRequest, res, next) => {
+router.post('/stream', rateLimitChat, async (req: AuthedRequest, res, next) => {
   try {
     const input = chatSchema.parse(req.body);
 

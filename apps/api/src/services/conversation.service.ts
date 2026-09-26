@@ -6,6 +6,7 @@ import {
   ConversationRow,
 } from '../repositories/conversation.repository';
 import { findMessagesByConversationId, MessageRow } from '../repositories/message.repository';
+import { HttpError } from '../middleware/errorHandler';
 
 export async function listConversations(userId: string): Promise<ConversationRow[]> {
   return findConversationsByUser(userId);
@@ -16,8 +17,8 @@ export async function getConversationWithMessages(
   userId: string
 ): Promise<{ conversation: ConversationRow; messages: MessageRow[] }> {
   const conversation = await findConversationById(conversationId);
-  if (!conversation) throw new Error('CONVERSATION_NOT_FOUND');
-  if (conversation.user_id !== userId) throw new Error('FORBIDDEN');
+  if (!conversation) throw new HttpError(404, 'Conversation not found.');
+  if (conversation.user_id !== userId) throw new HttpError(403, 'Access denied.');
 
   const messages = await findMessagesByConversationId(conversationId);
   return { conversation, messages };
@@ -28,7 +29,7 @@ export async function removeConversation(
   userId: string
 ): Promise<void> {
   const conversation = await findConversationById(conversationId);
-  if (!conversation) throw new Error('CONVERSATION_NOT_FOUND');
-  if (conversation.user_id !== userId) throw new Error('FORBIDDEN');
+  if (!conversation) throw new HttpError(404, 'Conversation not found.');
+  if (conversation.user_id !== userId) throw new HttpError(403, 'Access denied.');
   await deleteConversation(conversationId);
 }
