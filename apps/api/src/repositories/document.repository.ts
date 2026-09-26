@@ -1,4 +1,4 @@
-import { getDb, generateId } from '../db/database';
+import { query } from '../db/database';
 
 export interface DocumentRow {
   id: string;
@@ -9,63 +9,55 @@ export interface DocumentRow {
   size_bytes: number;
   status: string;
   error_message: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: Date;
+  updated_at: Date;
 }
 
-export interface CreateDocumentInput {
+export async function createDocument(data: {
   organizationId: string;
   ownerId: string;
   filename: string;
   mimeType: string;
   sizeBytes: number;
+}): Promise<DocumentRow> {
+  const result = await query<DocumentRow>(
+    `INSERT INTO documents (organization_id, owner_id, filename, mime_type, size_bytes, status)
+     VALUES ($1, $2, $3, $4, $5, 'processing')
+     RETURNING *`,
+    [data.organizationId, data.ownerId, data.filename, data.mimeType, data.sizeBytes]
+  );
+  return result.rows[0];
 }
 
-export function createDocument(input: CreateDocumentInput): DocumentRow {
-  const id = generateId('doc');
-  getDb()
-    .prepare(
-      `INSERT INTO documents (id, organization_id, owner_id, filename, mime_type, size_bytes, status)
-       VALUES (@id, @organizationId, @ownerId, @filename, @mimeType, @sizeBytes, 'processing')`
-    )
-    .run({ id, ...input });
-  return findDocumentById(id)!;
+export async function updateDocumentStatus(
+  id: string,
+  status: string,
+  errorMessage?: string
+): Promise<void> {
+  await query(
+    `UPDATE documents
+     SET status = $1, error_message = $2, updated_at = now()
+     WHERE id = $3`,
+    [status, errorMessage ?? null, id]
+  );
 }
 
-export function findDocumentById(id: string): DocumentRow | undefined {
-  return getDb().prepare('SELECT * FROM documents WHERE id = ?').get(id) as DocumentRow | undefined;
+export async function findDocumentById(id: string): Promise<DocumentRow | undefined> {
+  const result = await query<DocumentRow>(
+    'SELECT * FROM documents WHERE id = $1',
+    [id]
+  );
+  return result.rows[0];
 }
 
-/** Permission-scoped lookup -- always call this (not findDocumentById) from request handlers. */
-export function findDocumentByIdForOrg(id: string, organizationId: string): DocumentRow | undefined {
-  return getDb()
-    .prepare('SELECT * FROM documents WHERE id = ? AND organization_id = ?')
-    .get(id, organizationId) as DocumentRow | undefined;
+export async function findDocumentsByOrg(organizationId: string): Promise<DocumentRow[]> {
+  const result = await query<DocumentRow>(
+    'SELECT * FROM documents WHERE organization_id = $1 ORDER BY created_at DESC',
+    [organizationId]
+  );
+  return result.rows;
 }
 
-export function listDocumentsForOrg(organizationId: string): Array<DocumentRow & { chunk_count: number }> {
-  return getDb()
-    .prepare(
-      `SELECT d.*, (SELECT COUNT(*) FROM document_chunks c WHERE c.document_id = d.id) AS chunk_count
-       FROM documents d
-       WHERE d.organization_id = ?
-       ORDER BY d.created_at DESC`
-    )
-    .all(organizationId) as Array<DocumentRow & { chunk_count: number }>;
-}
-
-export function updateDocumentStatus(id: string, status: string, errorMessage: string | null): void {
-  getDb()
-    .prepare(
-      `UPDATE documents
-       SET status = ?, error_message = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       WHERE id = ?`
-    )
-    .run(status, errorMessage, id);
-}
-
-export function deleteDocument(id: string): void {
-  // ON DELETE CASCADE (foreign_keys pragma enabled in database.ts) removes
-  // dependent document_chunks and their citations.
-  getDb().prepare('DELETE FROM documents WHERE id = ?').run(id);
+export async function deleteDocument(id: string): Promise<void> {
+  await query('DELETE FROM documents WHERE id = $1', [id]);
 }

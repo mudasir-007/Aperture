@@ -1,19 +1,23 @@
-import { getDb, generateId } from '../db/database';
+import { query } from '../db/database';
 
-export interface Organization {
+export interface OrganizationRow {
   id: string;
   name: string;
-  created_at: string;
+  created_at: Date;
 }
 
-export function createOrganization(name: string): Organization {
-  const id = generateId('org');
-  getDb()
-    .prepare('INSERT INTO organizations (id, name) VALUES (?, ?)')
-    .run(id, name);
-  return findOrganizationById(id)!;
+export async function createOrganization(name: string): Promise<OrganizationRow> {
+  const result = await query<OrganizationRow>(
+    `INSERT INTO organizations (name) VALUES ($1) RETURNING *`,
+    [name]
+  );
+  return result.rows[0];
 }
 
-export function findOrganizationById(id: string): Organization | undefined {
-  return getDb().prepare('SELECT * FROM organizations WHERE id = ?').get(id) as Organization | undefined;
+export async function findOrganizationById(id: string): Promise<OrganizationRow | undefined> {
+  const result = await query<OrganizationRow>(
+    'SELECT * FROM organizations WHERE id = $1',
+    [id]
+  );
+  return result.rows[0];
 }

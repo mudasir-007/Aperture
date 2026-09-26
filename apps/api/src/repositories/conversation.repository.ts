@@ -1,36 +1,47 @@
-import { getDb, generateId } from '../db/database';
+import { query } from '../db/database';
 
 export interface ConversationRow {
   id: string;
   user_id: string;
   title: string | null;
-  created_at: string;
-  updated_at: string;
+  created_at: Date;
+  updated_at: Date;
 }
 
-export function createConversation(userId: string, title: string | null): ConversationRow {
-  const id = generateId('conv');
-  getDb()
-    .prepare('INSERT INTO conversations (id, user_id, title) VALUES (?, ?, ?)')
-    .run(id, userId, title);
-  return findConversationByIdForUser(id, userId)!;
+export async function createConversation(
+  userId: string,
+  title?: string
+): Promise<ConversationRow> {
+  const result = await query<ConversationRow>(
+    `INSERT INTO conversations (user_id, title) VALUES ($1, $2) RETURNING *`,
+    [userId, title ?? null]
+  );
+  return result.rows[0];
 }
 
-export function listConversationsForUser(userId: string): ConversationRow[] {
-  return getDb()
-    .prepare('SELECT * FROM conversations WHERE user_id = ? ORDER BY updated_at DESC')
-    .all(userId) as ConversationRow[];
+export async function findConversationById(id: string): Promise<ConversationRow | undefined> {
+  const result = await query<ConversationRow>(
+    'SELECT * FROM conversations WHERE id = $1',
+    [id]
+  );
+  return result.rows[0];
 }
 
-/** Ownership-scoped lookup -- always call this from request handlers, never a bare id lookup. */
-export function findConversationByIdForUser(id: string, userId: string): ConversationRow | undefined {
-  return getDb()
-    .prepare('SELECT * FROM conversations WHERE id = ? AND user_id = ?')
-    .get(id, userId) as ConversationRow | undefined;
+export async function findConversationsByUser(userId: string): Promise<ConversationRow[]> {
+  const result = await query<ConversationRow>(
+    'SELECT * FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC',
+    [userId]
+  );
+  return result.rows;
 }
 
-export function touchConversation(id: string): void {
-  getDb()
-    .prepare(`UPDATE conversations SET updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now') WHERE id = ?`)
-    .run(id);
+export async function updateConversationTitle(id: string, title: string): Promise<void> {
+  await query(
+    'UPDATE conversations SET title = $1, updated_at = now() WHERE id = $2',
+    [title, id]
+  );
+}
+
+export async function deleteConversation(id: string): Promise<void> {
+  await query('DELETE FROM conversations WHERE id = $1', [id]);
 }

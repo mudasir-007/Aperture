@@ -1,4 +1,4 @@
-import { getDb, generateId } from '../db/database';
+import { query } from '../db/database';
 
 export interface UserRow {
   id: string;
@@ -7,37 +7,37 @@ export interface UserRow {
   name: string;
   role: string;
   organization_id: string;
-  created_at: string;
+  created_at: Date;
 }
 
-export interface CreateUserInput {
+export async function createUser(data: {
   email: string;
   passwordHash: string;
   name: string;
-  role: string;
   organizationId: string;
+  role?: string;
+}): Promise<UserRow> {
+  const result = await query<UserRow>(
+    `INSERT INTO users (email, password_hash, name, organization_id, role)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [data.email, data.passwordHash, data.name, data.organizationId, data.role ?? 'member']
+  );
+  return result.rows[0];
 }
 
-export function createUser(input: CreateUserInput): UserRow {
-  const id = generateId('usr');
-  getDb()
-    .prepare(
-      `INSERT INTO users (id, email, password_hash, name, role, organization_id)
-       VALUES (@id, @email, @passwordHash, @name, @role, @organizationId)`
-    )
-    .run({ id, ...input });
-  return findUserById(id)!;
+export async function findUserByEmail(email: string): Promise<UserRow | undefined> {
+  const result = await query<UserRow>(
+    'SELECT * FROM users WHERE email = $1',
+    [email]
+  );
+  return result.rows[0];
 }
 
-export function findUserByEmail(email: string): UserRow | undefined {
-  return getDb().prepare('SELECT * FROM users WHERE email = ?').get(email) as UserRow | undefined;
-}
-
-export function findUserById(id: string): UserRow | undefined {
-  return getDb().prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
-}
-
-export function sanitizeUser(user: UserRow) {
-  const { password_hash: _passwordHash, ...safe } = user;
-  return safe;
+export async function findUserById(id: string): Promise<UserRow | undefined> {
+  const result = await query<UserRow>(
+    'SELECT * FROM users WHERE id = $1',
+    [id]
+  );
+  return result.rows[0];
 }
