@@ -82,15 +82,20 @@ CREATE TABLE IF NOT EXISTS citations (
   score REAL NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_citations_message ON citations(message_id);
-
--- Idempotent migration for existing databases that already had a documents table.
-ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_key TEXT;
-
-
 -- Full-text search index for hybrid retrieval.
 -- Uses an expression index so we don't pay the storage cost of a
 -- persisted tsvector column. Must match the expression in the query.
 CREATE INDEX IF NOT EXISTS idx_chunks_search_vector
   ON document_chunks
   USING gin (to_tsvector('english', content));
+
+CREATE INDEX IF NOT EXISTS idx_citations_message ON citations(message_id);
+
+-- Idempotent migration for existing databases that already had a documents table.
+ALTER TABLE documents ADD COLUMN IF NOT EXISTS s3_key TEXT;
+
+-- Rolling conversation summary + pointer to the last message included in it.
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary TEXT;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS summary_through_message_id UUID;
+
+

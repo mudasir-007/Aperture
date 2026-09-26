@@ -10,12 +10,6 @@ Rules:
 - Cite sources inline using [1], [2], etc. matching the numbered context items.
 - Be concise and direct.`;
 
-/**
- * Real OpenAI chat-completions integration. Not exercised in this sandbox
- * (no network access to api.openai.com and no API key), but implemented in
- * full -- prompt construction, timeout, and error handling -- per
- * docs/architecture.md Section 14 (External Integrations).
- */
 export class OpenAILLMProvider implements LLMProvider {
   readonly name = 'openai';
 
@@ -35,10 +29,31 @@ export class OpenAILLMProvider implements LLMProvider {
       ...input.conversationHistory.map((m) => ({ role: m.role, content: m.content })),
       {
         role: 'user',
-        content: `Context:\n${contextBlock || '(no relevant context was found)'}\n\nQuestion: ${input.question}`
-      }
+        content: `Context:\n${contextBlock || '(no relevant context was found)'}\n\nQuestion: ${input.question}`,
+      },
     ];
 
+    const answer = await this.chatCompletion(messages, 0.2);
+    return {
+      answer,
+      usedChunkIds: input.context.map((c) => c.chunkId),
+    };
+  }
+
+  async complete(prompt: string, systemPrompt: string): Promise<string> {
+    return this.chatCompletion(
+      [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: prompt },
+      ],
+      0.3
+    );
+  }
+
+  private async chatCompletion(
+    messages: Array<{ role: string; content: string }>,
+    temperature: number
+  ): Promise<string> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -47,10 +62,10 @@ export class OpenAILLMProvider implements LLMProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`
+          Authorization: `Bearer ${this.apiKey}`,
         },
-        body: JSON.stringify({ model: this.model, messages, temperature: 0.2 }),
-        signal: controller.signal
+        body: JSON.stringify({ model: this.model, messages, temperature }),
+        signal: controller.signal,
       });
 
       if (!response.ok) {
@@ -59,12 +74,7 @@ export class OpenAILLMProvider implements LLMProvider {
       }
 
       const json = (await response.json()) as OpenAIChatResponse;
-      const answer = json.choices[0]?.message?.content ?? '';
-
-      return {
-        answer,
-        usedChunkIds: input.context.map((c) => c.chunkId)
-      };
+      return json.choices[0]?.message?.content ?? '';
     } finally {
       clearTimeout(timeout);
     }

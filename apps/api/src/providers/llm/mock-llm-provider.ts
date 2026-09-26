@@ -1,16 +1,9 @@
 import { GenerateAnswerInput, GenerateAnswerResult, LLMProvider } from './llm-provider';
 
 /**
- * Deterministic, dependency-free "generation" provider: it does real
- * extractive synthesis over the retrieved context (not a canned string),
- * so ingestion + retrieval + chat is a genuinely working end-to-end path
- * with zero external API keys or network access. It is honest about its
- * own limits: if no context was retrieved, it says so rather than
- * hallucinating, matching the hallucination-mitigation approach documented
- * in docs/architecture.md Section 7.
- *
- * Set LLM_PROVIDER=openai in .env for real generative answers in a
- * deployed environment.
+ * Deterministic, dependency-free provider. Real extractive synthesis over
+ * retrieved context, no external calls. `complete` returns a truncated
+ * passthrough of the prompt as a stand-in summary.
  */
 export class MockLLMProvider implements LLMProvider {
   readonly name = 'mock';
@@ -23,7 +16,7 @@ export class MockLLMProvider implements LLMProvider {
         answer:
           "I don't have any relevant information in the connected documents to answer that question. " +
           'Try uploading a document that covers this topic, or rephrase your question.',
-        usedChunkIds: []
+        usedChunkIds: [],
       };
     }
 
@@ -40,8 +33,14 @@ export class MockLLMProvider implements LLMProvider {
 
     return {
       answer,
-      usedChunkIds: context.map((item) => item.chunkId)
+      usedChunkIds: context.map((item) => item.chunkId),
     };
+  }
+
+  async complete(prompt: string, _systemPrompt: string): Promise<string> {
+    const cleaned = prompt.replace(/\s+/g, ' ').trim();
+    const truncated = cleaned.length > 400 ? `${cleaned.slice(0, 397)}...` : cleaned;
+    return `[Mock summary] ${truncated}`;
   }
 
   private firstSentence(text: string): string {

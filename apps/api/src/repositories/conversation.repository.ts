@@ -4,6 +4,8 @@ export interface ConversationRow {
   id: string;
   user_id: string;
   title: string | null;
+  summary: string | null;
+  summary_through_message_id: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -65,4 +67,24 @@ export async function listConversationsForUser(
 
 export async function touchConversation(id: string): Promise<void> {
   await query('UPDATE conversations SET updated_at = now() WHERE id = $1', [id]);
+}
+
+/**
+ * Stores a rolling summary and marks the last message included in it.
+ * The pointer lets us incrementally fold new messages into the summary
+ * without re-summarizing the whole conversation on every turn.
+ */
+export async function updateConversationSummary(
+  id: string,
+  summary: string,
+  throughMessageId: string
+): Promise<void> {
+  await query(
+    `UPDATE conversations
+     SET summary = $1,
+         summary_through_message_id = $2,
+         updated_at = now()
+     WHERE id = $3`,
+    [summary, throughMessageId, id]
+  );
 }

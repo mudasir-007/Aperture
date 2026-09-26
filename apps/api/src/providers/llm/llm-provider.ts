@@ -26,3 +26,15 @@ export interface LLMProvider {
   readonly name: string;
   generateAnswer(input: GenerateAnswerInput): Promise<GenerateAnswerResult>;
 }
+
+
+
+export interface LLMProvider {
+  readonly name: string;
+  generateAnswer(input: GenerateAnswerInput): Promise<GenerateAnswerResult>;
+  /**
+   * Generic text completion. Used for auxiliary tasks like conversation
+   * summarization where the structured RAG prompt shape doesn't apply.
+   */
+  complete(prompt: string, systemPrompt: string): Promise<string>;
+}

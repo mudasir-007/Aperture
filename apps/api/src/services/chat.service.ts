@@ -1,15 +1,17 @@
 import { getLLMProvider } from '../providers/llm';
 import { retrieveRelevantChunks } from './retrieval.service';
+import { buildConversationContext } from './history.service';
 import {
   createConversation,
   findConversationByIdForUser,
   touchConversation,
+  ConversationRow,
 } from '../repositories/conversation.repository';
 import {
   createMessage,
   listMessagesForConversation,
+  createCitations,
 } from '../repositories/message.repository';
-import { createCitations } from '../repositories/message.repository';
 
 export interface ChatResult {
   conversationId: string;
@@ -29,34 +31,55 @@ export async function chat(input: {
   query: string;
   conversationId?: string;
 }): Promise<ChatResult> {
-  // 1. Resolve or create conversation
-  let conversationId = input.conversationId;
-  if (conversationId) {
-    const conv = await findConversationByIdForUser(conversationId, input.userId);
-    if (!conv) throw new Error('CONVERSATION_NOT_FOUND');
+  // 1. Resolve or create conversation.
+  let conversation: ConversationRow;
+  if (input.conversationId) {
+    const found = await findConversationByIdForUser(
+      input.conversationId,
+      input.userId
+    );
+    if (!found) throw new Error('CONVERSATION_NOT_FOUND');
+    conversation = found;
   } else {
-    const conv = await createConversation(input.userId, input.query.slice(0, 60));
-    conversationId = conv.id;
+    conversation = await createConversation(input.userId, input.query.slice(0, 60));
   }
 
-  // 2. Load conversation history (before persisting this user turn)
-  const priorMessages = await listMessagesForConversation(conversationId);
-  const conversationHistory = priorMessages.map((m) => ({
-    role: m.role as 'user' | 'assistant',
-    content: m.content,
-  }));
+  // 2. Load prior messages.
+  const priorMessages = await listMessagesForConversation(conversation.id);
 
-  // 3. Persist user message
+  // 3. Build context (may trigger summarization of older messages).
+  const { summary, recentMessages } = await buildConversationContext(
+    conversation,
+    priorMessages
+  );
+
+  // 4. Persist this user's new message.
   await createMessage({
-    conversationId,
+    conversationId: conversation.id,
     role: 'user',
     content: input.query,
   });
 
-  // 4. Retrieve context
+  // 5. Retrieve context from the org's documents.
   const chunks = await retrieveRelevantChunks(input.organizationId, input.query);
 
-  // 5. Call the LLM through its real interface
+  // 6. Assemble the conversation history passed to the LLM.
+  //    Summary (if any) goes in as the first assistant turn with a marker.
+  const conversationHistory: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+  if (summary) {
+    conversationHistory.push({
+      role: 'assistant',
+      content: `[Summary of earlier conversation]\n${summary}`,
+    });
+  }
+  for (const m of recentMessages) {
+    conversationHistory.push({
+      role: m.role as 'user' | 'assistant',
+      content: m.content,
+    });
+  }
+
+  // 7. Generate the answer.
   const llm = getLLMProvider();
   const generationResult = await llm.generateAnswer({
     question: input.query,
@@ -68,14 +91,14 @@ export async function chat(input: {
     conversationHistory,
   });
 
-  // 6. Persist assistant message
+  // 8. Persist assistant message.
   const assistantMessage = await createMessage({
-    conversationId,
+    conversationId: conversation.id,
     role: 'assistant',
     content: generationResult.answer,
   });
 
-  // 7. Persist citations for the retrieved chunks that were used
+  // 9. Persist citations for the chunks the LLM actually used.
   const usedChunks = chunks.filter((c) =>
     generationResult.usedChunkIds.includes(c.chunkId)
   );
@@ -88,10 +111,10 @@ export async function chat(input: {
     }))
   );
 
-  await touchConversation(conversationId);
+  await touchConversation(conversation.id);
 
   return {
-    conversationId,
+    conversationId: conversation.id,
     answer: generationResult.answer,
     citations: usedChunks,
   };

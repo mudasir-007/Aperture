@@ -1,324 +1,359 @@
-# RAG Chat Application (MVP)
+Aperture
 
-A working, end-to-end Retrieval-Augmented Generation chat application: upload
-documents, ask questions, get cited answers grounded in your own content.
+A production-grade, multi-tenant RAG (Retrieval-Augmented Generation) chat application. Ingests arbitrary documents, performs hybrid retrieval with cross-encoder reranking, and generates cited answers grounded in your organization's own data.
 
-This is the **MVP implementation** of the full architecture described in
-[`docs/architecture.md`](docs/architecture.md) (Phases 1–4 of that document's
-roadmap). It is genuinely runnable end-to-end with **zero external services
-or API keys** — see [Known Limitations & Scope](#known-limitations--scope)
-for exactly what that means and what's deliberately deferred.
+Overview
+Aperture is a full-stack TypeScript monorepo that implements a complete RAG pipeline:
 
-## 1. Overview
+Document ingestion — Upload PDF, DOCX, CSV, XLSX, PPTX, HTML, Markdown, and plain text. Files are stored in S3-compatible object storage, parsed by Apache Tika, chunked, embedded, and indexed.
 
-- Register an organization + user account.
-- Upload plain-text (`.txt`) or Markdown (`.md`) documents.
-- Documents are chunked, embedded, and indexed automatically on upload.
-- Ask questions in a chat interface; answers are grounded in retrieved
-  document chunks and show their sources (citations), or honestly say when
-  no relevant document was found.
-- Retrieval is scoped to your organization only — a hard permission boundary
-  enforced at the database query level, not a post-filter.
+Hybrid retrieval — Dense vector search (pgvector + HNSW) is fused with PostgreSQL full-text search via Reciprocal Rank Fusion. This means exact-match queries (error codes, SKUs, acronyms) work just as well as semantic queries.
 
-## 2. Architecture
+Cross-encoder reranking — The top candidates from hybrid search are scored by a cross-encoder (local ONNX or Cohere). Only the top 5 chunks reach the LLM.
 
-See [`docs/architecture.md`](docs/architecture.md) for the full system
-design. In short, this MVP implements:
+Multi-tenant authorization — Every retrieval query is scoped to the caller's organization at the SQL level. Chunks from another tenant can never be returned.
 
-```
-Browser (React SPA)
-     │  fetch, JSON + multipart
-     ▼
-Express API (apps/api)
-  ├── auth (register/login, JWT, bcrypt)
-  ├── documents (upload → parse → chunk → embed → index, synchronous)
-  ├── conversations (create/list/get)
-  └── chat (retrieve → generate → cite, per message)
-     │
-     ▼
-SQLite (better-sqlite3), file-based
-  organizations, users, documents, document_chunks (embeddings as JSON),
-  conversations, messages, citations
-     │
-     ▼
-Pluggable AI providers (src/providers/{embeddings,llm})
-  Mock (default, deterministic, no network) | OpenAI (real, needs API key)
-```
+Async ingestion — Uploads return immediately (HTTP 202). BullMQ workers handle parsing and embedding in the background with retry and dead-letter handling.
 
-## 3. Technologies
+Architecture
+text
+┌────────────────────────────────────────────────────────────────┐
+│  Client (Web / API consumer)                                   │
+└─────────────────────────┬──────────────────────────────────────┘
+                          │ HTTPS
+                          ▼
+┌────────────────────────────────────────────────────────────────┐
+│  API Layer (Express + TypeScript)                              │
+│                                                                │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐  │
+│  │  Auth    │  │Documents │  │ Retrieval│  │   Chat       │  │
+│  │  Routes  │  │  Routes  │  │  Service │  │   Service    │  │
+│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬───────┘  │
+│       │             │             │               │          │
+└───────┼─────────────┼─────────────┼───────────────┼──────────┘
+        │             │             │               │
+        ▼             ▼             ▼               ▼
+   ┌────────┐   ┌──────────┐  ┌──────────┐   ┌──────────┐
+   │Postgres│   │  MinIO   │  │ Retrieval│   │  OpenAI  │
+   │pgvector│   │   (S3)   │  │  Funnel  │   │  /LLM    │
+   └────────┘   └──────────┘  └────┬─────┘   └──────────┘
+                                   │
+                    ┌──────────────┴──────────────┐
+                    ▼                             ▼
+            ┌──────────────┐              ┌──────────────┐
+            │   Hybrid     │              │  Cross-Enc.  │
+            │   Search     │              │  Reranker    │
+            │ (Dense+BM25) │              │  (ONNX)      │
+            └──────────────┘              └──────────────┘
 
-| Layer | Technology | Why |
-|---|---|---|
-| API | Node.js 22, TypeScript, Express | Simple, well-understood, easy to extend |
-| Data | SQLite via `better-sqlite3` | Zero external infra for MVP; see [Known Limitations](#known-limitations--scope) for the Postgres+pgvector migration path |
-| Auth | JWT + bcrypt | Standard, stateless |
-| Validation | Zod | Type-safe request validation |
-| Frontend | React 18 + Vite + TypeScript | Fast dev loop, small bundle |
-| Testing | Jest + Supertest (API) | Real HTTP-level integration tests, not just mocks |
-| Containerization | Docker, Docker Compose | Reproducible local/prod-like runs |
+        ┌────────────────────────────────────────────┐
+        │  Async Ingestion (BullMQ + Redis)          │
+        │                                            │
+        │  Upload → S3 → Queue → Worker              │
+        │    └─> Tika → Chunk → Embed → pgvector    │
+        └────────────────────────────────────────────┘
+Retrieval funnel
+text
+10M documents
+      │
+      ▼  SQL: WHERE organization_id = $org AND status = 'ready'
+Permitted subset (~thousands)
+      │
+      ▼  Hybrid search (dense + sparse, RRF fusion, top 100)
+100 candidates
+      │
+      ▼  Cross-encoder rerank
+Top 5 chunks
+      │
+      ▼  Prompt construction
+LLM answer with citations
+Technology Stack
+Domain	Technology	Purpose
+Runtime	Node.js 20+, TypeScript 5.3+	Backend, workers
+API framework	Express 4	HTTP layer
+Database	PostgreSQL 16 + pgvector	Relational data + vector embeddings
+Vector index	HNSW (vector_cosine_ops)	Sub-millisecond ANN search
+Full-text index	GIN on to_tsvector('english', content)	BM25-equivalent sparse retrieval
+Job queue	BullMQ + Redis 7	Async document ingestion
+Object storage	MinIO (dev) / Cloudflare R2 (prod)	Raw file storage, S3-compatible
+Document parsing	Apache Tika (Docker)	PDF, DOCX, CSV, XLSX, PPTX, HTML
+Embeddings	OpenAI text-embedding-3-small (1536 dims)	Query + chunk vectors
+Reranker	Xenova/bge-reranker-base via ONNX Runtime	Cross-encoder scoring (local, no API cost)
+LLM	OpenAI GPT-4o-mini / Claude / Mock	Answer generation
+Auth	JWT (HS256) + bcrypt	Sessions and password hashing
+Everything in dev runs on free, self-hosted Docker services. No paid infrastructure is required to develop or test.
 
-## 4. Requirements
-
-- Node.js 22+ and npm 10+ (or Docker, see [Docker](#9-docker))
-- No database server, no external API key required to run the full app —
-  see the Mock providers below.
-
-## 5. Installation
-
-```bash
-git clone <this-repo>
-cd rag-chat-app
-npm install
-```
-
-This installs both `apps/api` and `apps/web` via npm workspaces.
-
-## 6. Environment configuration
-
-```bash
-cp apps/api/.env.example apps/api/.env
-cp apps/web/.env.example apps/web/.env   # optional for local dev; the Vite dev server proxies /api by default
-```
-
-Key variables (full list with comments in `apps/api/.env.example`):
-
-| Variable | Default | Notes |
-|---|---|---|
-| `DB_FILE` | `./data/dev.db` | SQLite file path |
-| `JWT_SECRET` | *(dev placeholder)* | **Change this** for anything beyond local dev |
-| `EMBEDDING_PROVIDER` | `mock` | Set to `openai` + provide `OPENAI_API_KEY` for real semantic embeddings |
-| `LLM_PROVIDER` | `mock` | Set to `openai` + provide `OPENAI_API_KEY` for real generated answers |
-| `RETRIEVAL_TOP_K` | `5` | How many chunks are retrieved per question |
-
-The **Mock providers are the default and are what CI/tests use** — they make
-ingestion, retrieval, and chat genuinely functional with no network access:
-the mock embedding provider uses deterministic feature hashing (shared
-vocabulary → higher similarity), and the mock LLM does real extractive
-synthesis over retrieved chunks rather than returning a canned string.
-
-## 7. Database setup
-
-There is no separate migration step to run — `apps/api/src/db/database.ts`
-applies `apps/api/src/db/schema.sql` (idempotent `CREATE TABLE IF NOT
-EXISTS` statements) automatically the first time the app or test suite
-touches the database. The SQLite file is created at `DB_FILE` if it doesn't
-exist.
-
-To seed a demo account (`demo@example.com` / `password123`):
-
-```bash
-npm run seed --workspace apps/api
-```
-
-## 8. Running locally
-
-In two terminals:
-
-```bash
-npm run dev:api   # http://localhost:4000
-npm run dev:web   # http://localhost:5173, proxies /api to :4000
-```
-
-Open `http://localhost:5173`, register an account, upload a `.txt` or `.md`
-file, and start chatting.
-
-## 9. Docker
-
-```bash
-cp .env.example .env   # set a real JWT_SECRET
-docker compose up --build
-```
-
-- API: `http://localhost:4000`
-- Web: `http://localhost:8080` (nginx serves the built SPA and proxies
-  `/api` to the API container)
-
-The API's SQLite file lives on a named Docker volume (`api-data`) so data
-survives container restarts.
-
-## 10. Running tests
-
-```bash
-npm test --workspace apps/api
-```
-
-This runs 8 test suites / 35 tests: unit tests (chunker, cosine similarity,
-JWT, the mock embedding provider, response serialization) and integration
-tests that hit the real Express app over HTTP with Supertest against a real
-(isolated) SQLite test database — including a full ingest → retrieve →
-generate → cite flow and a cross-organization data-isolation check.
-
-**Actually verified in this environment:** `npm run lint` (type-check),
-`npm run build` (both workspaces), `npm test` (all 35 tests), and two manual
-end-to-end HTTP smoke tests against the built server (register → upload →
-ask → cited answer). All passed. `npm audit` reports 0 vulnerabilities
-across the whole workspace as of the versions pinned in this repo.
-
-## 11. Building
-
-```bash
-npm run build   # builds apps/api (tsc) and apps/web (tsc + vite build)
-```
-
-API build output: `apps/api/dist` (also copies `schema.sql`, which the
-compiled `database.js` reads at runtime — don't skip this if you build the
-API manually). Web build output: `apps/web/dist` (static assets).
-
-## 12. Deployment
-
-See `docker-compose.yml` and `infra/Dockerfile.{api,web}` for a working
-containerized deployment. For a real deployment:
-
-- Set a strong, unique `JWT_SECRET`.
-- Set `EMBEDDING_PROVIDER=openai` and `LLM_PROVIDER=openai` with a real
-  `OPENAI_API_KEY` for genuinely generated (not extractive-mock) answers.
-- Mount `DB_FILE`'s directory on persistent storage (the Compose file
-  already does this via a named volume).
-- Set `VITE_API_BASE_URL` as a Docker build arg if the API is served from a
-  different origin than the web app in your deployment.
-
-## 13. API overview
-
-| Method | Path | Auth | Purpose |
-|---|---|---|---|
-| POST | `/api/auth/register` | – | Create an org + admin user, returns a JWT |
-| POST | `/api/auth/login` | – | Returns a JWT |
-| POST | `/api/documents` | Bearer | Upload a document (`multipart/form-data`, field `file`) |
-| GET | `/api/documents` | Bearer | List your organization's documents |
-| GET | `/api/documents/:id` | Bearer | Get one document |
-| DELETE | `/api/documents/:id` | Bearer | Delete (owner or org admin only); cascades to chunks/citations |
-| POST | `/api/conversations` | Bearer | Create a conversation |
-| GET | `/api/conversations` | Bearer | List your conversations |
-| GET | `/api/conversations/:id` | Bearer | Get a conversation with full message + citation history |
-| POST | `/api/conversations/:id/messages` | Bearer | Send a message; runs retrieval + generation, returns the answer + citations |
-| GET | `/api/health` | – | Liveness/readiness check |
-
-All error responses share the shape `{ "error": { "message": "..." } }`
-(validation errors also include a `details` field).
-
-## 14. Project structure
-
-```
-rag-chat-app/
+Repository Structure
+text
+Aperture/
 ├── apps/
-│   ├── api/                  # Express + TypeScript backend
-│   │   ├── src/
-│   │   │   ├── config/       # env loading + validation
-│   │   │   ├── controllers/  # HTTP request handlers
-│   │   │   ├── db/           # SQLite connection + schema.sql
-│   │   │   ├── middleware/   # auth, validation, error handling
-│   │   │   ├── providers/    # pluggable embeddings/ + llm/ (mock + OpenAI)
-│   │   │   ├── repositories/ # raw-SQL data access, one file per entity
-│   │   │   ├── routes/       # Express route definitions
-│   │   │   ├── services/     # business logic (ingestion, retrieval, generation, auth)
-│   │   │   ├── utils/        # jwt, cosine similarity, validation schemas, serialization
-│   │   │   ├── app.ts        # Express app assembly
-│   │   │   └── index.ts      # entry point
-│   │   ├── scripts/seed.ts
-│   │   └── tests/{unit,integration}/
-│   └── web/                  # React + Vite frontend
+│   └── api/                          # Express + TypeScript backend
 │       └── src/
-│           ├── api/client.ts      # typed fetch wrapper
-│           ├── context/AuthContext.tsx
-│           ├── components/RequireAuth.tsx
-│           └── pages/{LoginPage,DocumentsPage,ChatPage}.tsx
-├── docs/architecture.md      # full target architecture (see status note at its top)
-├── infra/                    # Dockerfiles + nginx config
-├── docker-compose.yml
-├── .env.example
-└── package.json              # npm workspaces root
-```
+│           ├── config/
+│           │   └── env.ts            # Zod-validated environment
+│           ├── db/
+│           │   ├── database.ts       # pg.Pool, query, withTransaction, initDb
+│           │   └── schema.sql        # Full schema with pgvector + FTS
+│           ├── middleware/
+│           │   ├── auth.ts           # JWT verification
+│           │   ├── errorHandler.ts   # HttpError + global handler
+│           │   └── validate.ts       # Zod request validation
+│           ├── parsing/
+│           │   └── tika.client.ts    # Tika HTTP client
+│           ├── providers/
+│           │   ├── embeddings/       # Embedding provider interface + OpenAI
+│           │   ├── llm/              # LLM provider interface + Mock + OpenAI
+│           │   └── reranker/         # Reranker interface + Mock + Local
+│           ├── queue/
+│           │   └── ingestion.queue.ts # BullMQ Queue + Worker
+│           ├── repositories/         # All DB access, async, org-scoped
+│           ├── routes/
+│           │   ├── auth.routes.ts
+│           │   ├── chat.routes.ts
+│           │   ├── conversations.routes.ts
+│           │   ├── documents.routes.ts
+│           │   └── health.routes.ts
+│           ├── services/
+│           │   ├── auth.service.ts
+│           │   ├── chat.service.ts
+│           │   ├── document.service.ts
+│           │   ├── ingestion.service.ts
+│           │   └── retrieval.service.ts
+│           ├── storage/
+│           │   └── s3.client.ts      # S3/MinIO client
+│           ├── app.ts                # createApp() factory
+│           └── index.ts              # Entry point
+├── docker-compose.yml                # Postgres, Redis, MinIO, Tika
+├── package.json
+└── README.md
+Requirements
+Node.js 20 or newer
 
-## 15. Important configuration
+pnpm (or npm/yarn)
 
-- **`JWT_SECRET`** — must be changed from the dev default for any
-  non-local use; the app fails fast at startup if it's missing or under 8
-  characters, but does not enforce strength beyond that.
-- **`EMBEDDING_PROVIDER` / `LLM_PROVIDER`** — switching either to `openai`
-  requires `OPENAI_API_KEY`; the app fails fast at startup if that
-  combination is misconfigured, rather than failing on the first request.
-- **File types** — only `text/plain` and `text/markdown` are accepted by
-  the ingestion pipeline today (see `src/services/parser.service.ts`); other
-  types are rejected with a clear per-document error, not a crash.
+Docker and Docker Compose
 
-## 16. Troubleshooting
+Optional: an OpenAI API key for real embeddings and generation
 
-| Symptom | Likely cause / fix |
-|---|---|
-| `Invalid environment configuration` at startup | Check `apps/api/.env` against `.env.example`; a required var is missing or malformed |
-| Document status stuck at `processing` | It shouldn't be — ingestion is synchronous in this MVP (see [Known Limitations](#known-limitations--scope)); check server logs for an ingestion error |
-| Document status `failed` with an "Unsupported file type" message | Only `.txt`/`.md` are supported currently; see Section 15 |
-| `401` on every API call from the frontend | Token expired (`JWT_EXPIRES_IN`) or not sent — check `Authorization: Bearer <token>` |
-| Chat answers ignore an uploaded document | Confirm the document's `status` is `ready` (check `GET /api/documents`) |
-| `npm run build` output runs but crashes on startup looking for `schema.sql` | You built with a partial command — use `npm run build` as defined in `apps/api/package.json`, which copies `schema.sql` into `dist/db/` |
+Quick Start
+1. Clone and install
+bash
+git clone https://github.com/mudasir-007/Aperture.git
+cd Aperture
+npm install
+2. Configure environment
+bash
+cp .env.example .env
+Edit .env and set at minimum:
 
-## 17. Development workflow
+env
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rag_chat
+REDIS_URL=redis://localhost:6379
+JWT_SECRET=replace-with-a-long-random-string-min-16-chars
+To use real LLMs and embeddings instead of the mock providers:
 
-1. Make a change in `apps/api/src` or `apps/web/src`.
-2. `npm run dev:api` / `npm run dev:web` hot-reload automatically.
-3. Before committing: `npm run lint --workspace apps/api`, `npm run
-   lint --workspace apps/web`, and `npm test --workspace apps/api`.
-4. New backend behavior should come with a test in `apps/api/tests/unit` or
-   `apps/api/tests/integration` — the existing suite is the pattern to
-   follow (real HTTP calls via Supertest, real SQLite, no mocked DB layer).
+env
+LLM_PROVIDER=openai
+EMBEDDING_PROVIDER=openai
+OPENAI_API_KEY=sk-...
+To enable the local cross-encoder reranker (downloads ~280MB on first run):
 
----
+env
+RERANKER_PROVIDER=local
+3. Start infrastructure
+bash
+docker compose up -d
+This starts four services:
 
-## Known Limitations & Scope
+Service	Port	Purpose
+PostgreSQL + pgvector	5432	Relational + vector data
+Redis	6379	BullMQ job queue
+MinIO (S3)	9000 (API), 9001 (console)	Object storage
+Apache Tika	9998	Document parsing
+Wait ~30 seconds for Tika's JVM to boot. Check status with docker compose ps.
 
-This is an honest account of what was deliberately deferred, and why — not
-a comprehensive project audit disguised as a finished product.
+4. Run the API
+bash
+npm run dev --workspace apps/api
+On boot you should see:
 
-**Environment-forced decisions:**
-- **Prisma was replaced with `better-sqlite3` + a hand-written repository
-  layer.** Prisma's query-engine binary must be downloaded from
-  `binaries.prisma.sh` at `generate` time; that domain was unreachable in
-  the sandbox this was built in. Rather than ship unverified Prisma code, the
-  data layer was rewritten around a dependency confirmed to install and run
-  natively in this environment, so every claim in this README about tests
-  passing and builds succeeding is something that was actually executed, not
-  assumed.
-- **SQLite instead of Postgres+pgvector.** Same root cause — no reachable
-  Postgres server in this sandbox to migrate against and verify. `docs/architecture.md`
-  documents the intended migration; `src/services/retrieval.service.ts` and
-  the repository layer are written as a seam for it (swap the query, not the
-  callers).
+text
+[db] schema ready
+[s3] bucket ready
+[ingestion] worker started
+API listening on port 4000
+The database schema is applied automatically on every start (idempotent).
 
-**Deliberate MVP scope reductions** (all documented inline in source
-comments at the point they apply, referencing the relevant
-`docs/architecture.md` section):
-- **Ingestion is synchronous, in-process**, not queue/worker-based. No
-  retry/dead-letter-queue behavior. Fine for MVP document volumes; the
-  `Document.status` field is the seam a future queue-backed worker would use.
-- **Only `.txt`/`.md` ingestion** — no Tika/Docling/PDF/OCR. The parser has a
-  single, documented seam (`parser.service.ts`) to add them.
-- **Retrieval is dense-vector-only** (brute-force cosine similarity over a
-  deterministic feature-hashed embedding by default, or real OpenAI
-  embeddings if configured) — no BM25/hybrid fusion, no cross-encoder
-  re-ranking stage yet.
-- **No conditional router, multi-agent system, self-correction loop, or
-  red-teaming automation.** These are real, higher-complexity features from
-  the full architecture that are appropriately Phase 5/6 work, not MVP.
-- **No conversation history summarization** — long conversations use a
-  simple recency window (last 20 messages).
-- **Rate limiting is global, not per-tenant/per-endpoint.**
-- **The OpenAI provider implementations are complete but unverified** in
-  this sandbox — no network access to `api.openai.com` here. They follow the
-  same request/response/error/timeout handling pattern as the tested Mock
-  providers; a live smoke test against a real API key is recommended before
-  relying on them in production.
-- **`docker-compose.yml` and the Dockerfiles are written but unverified** —
-  no Docker daemon is available in this sandbox to build or run them. They
-  follow standard multi-stage build patterns (see inline comments), but
-  should be smoke-tested (`docker compose up --build`, then repeat the
-  register → upload → chat flow) before relying on them.
+5. Test the flow
+Register a user:
 
-**What was actually verified, precisely** (so nothing here is taken on
-faith): `npm audit` (0 vulnerabilities, both workspaces), `tsc --noEmit`
-(both workspaces), `npm run build` (both workspaces, including confirming
-`schema.sql` is copied into `dist/`), the full Jest suite (8 suites / 35
-tests, unit + integration, run twice across dependency-version changes),
-and two manual end-to-end HTTP smoke tests against the compiled server
-covering register → upload → create conversation → ask a question → receive
-a correctly-cited answer, plus explicit verification that one organization's
-documents are never retrievable by another organization's user.
+bash
+curl -X POST http://localhost:4000/api/v1/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"password123","name":"You","organizationName":"Acme"}'
+Copy the returned token, then upload a document:
+
+bash
+curl -X POST http://localhost:4000/api/v1/documents/upload \
+  -H "Authorization: Bearer PASTE_TOKEN_HERE" \
+  -F "file=@some-document.pdf"
+The upload returns immediately with status: "processing". The worker parses, chunks, embeds, and indexes it in the background. Check status:
+
+bash
+curl http://localhost:4000/api/v1/documents/PASTE_DOCUMENT_ID \
+  -H "Authorization: Bearer PASTE_TOKEN_HERE"
+When status becomes "ready", ask a question:
+
+bash
+curl -X POST http://localhost:4000/api/v1/chat \
+  -H "Authorization: Bearer PASTE_TOKEN_HERE" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What does this document say about pricing?"}'
+Environment Variables
+Required
+Variable	Example	Purpose
+DATABASE_URL	postgresql://postgres:postgres@localhost:5432/rag_chat	PostgreSQL connection
+JWT_SECRET	16+ character string	Token signing key
+REDIS_URL	redis://localhost:6379	BullMQ queue
+Optional (with defaults)
+Variable	Default	Purpose
+NODE_ENV	development	Runtime mode
+PORT	4000	HTTP port
+JWT_EXPIRES_IN	7d	JWT lifetime
+LLM_PROVIDER	mock	mock or openai
+EMBEDDING_PROVIDER	mock	mock or openai
+RERANKER_PROVIDER	mock	mock, local, or cohere
+OPENAI_API_KEY	—	Required when *_PROVIDER=openai
+OPENAI_CHAT_MODEL	gpt-4o-mini	Chat completion model
+OPENAI_EMBEDDING_MODEL	text-embedding-3-small	Embedding model
+RERANKER_MODEL	Xenova/bge-reranker-base	Local reranker model ID
+RERANK_TOP_K	5	Final chunks after reranking
+HYBRID_CANDIDATE_POOL	100	Candidates per hybrid search stage
+RETRIEVAL_TOP_K	5	Fallback top-K if reranking disabled
+CHUNK_SIZE_CHARS	800	Chunk size
+CHUNK_OVERLAP_CHARS	120	Chunk overlap
+S3_ENDPOINT	http://localhost:9000	S3/MinIO endpoint
+S3_REGION	us-east-1	S3 region
+S3_ACCESS_KEY	minioadmin	S3 access key
+S3_SECRET_KEY	minioadmin	S3 secret key
+S3_BUCKET	aperture-documents	Bucket name
+TIKA_URL	http://localhost:9998	Tika server URL
+API Reference
+All endpoints are under /api/v1. Authenticated endpoints require Authorization: Bearer <token>.
+
+Auth
+Method	Path	Purpose
+POST	/auth/register	Create organization + first admin user
+POST	/auth/login	Obtain JWT
+GET	/auth/me	Current user info
+Documents
+Method	Path	Purpose
+POST	/documents/upload	Upload file (multipart, field name file)
+GET	/documents	List all documents for the caller's org
+GET	/documents/:id	Get document + chunk count
+DELETE	/documents/:id	Delete document and cascade to chunks
+Upload returns 202 Accepted with { document, jobId, status: "processing" }.
+
+Chat
+Method	Path	Purpose
+POST	/chat	Send a query, receive an answer with citations
+GET	/conversations	List caller's conversations
+GET	/conversations/:id	Get conversation + messages + citations
+DELETE	/conversations/:id	Delete conversation
+Health
+Method	Path	Purpose
+GET	/health	Liveness check including DB connectivity
+Database Schema
+Table	Purpose
+organizations	Tenant root
+users	Members of an organization
+documents	Uploaded files (metadata + S3 key + ingestion status)
+document_chunks	Chunk content, vector(1536) embedding, chunk_index
+conversations	Chat sessions per user
+messages	Individual user/assistant turns
+citations	Maps assistant messages to source chunks
+Key indexes:
+
+idx_chunks_embedding_hnsw — HNSW on embedding vector_cosine_ops for dense search
+
+idx_chunks_search_vector — GIN on to_tsvector('english', content) for sparse search
+
+idx_documents_org_status — (organization_id, status) for permission-filtered listing
+
+Cascade deletes ensure that removing a document removes its chunks and citations; removing an organization removes everything beneath it.
+
+How Retrieval Works
+A single query goes through five stages:
+
+Query embedding — The query is embedded via the configured provider (text-embedding-3-small by default).
+
+Hybrid search — Two parallel SQL CTEs run:
+
+Dense: ORDER BY embedding <=> $query LIMIT 100
+
+Sparse: ORDER BY ts_rank_cd(to_tsvector('english', content), plainto_tsquery('english', $query)) LIMIT 100
+
+RRF fusion — Both ranked lists are joined with FULL OUTER JOIN and fused using 1/(60 + rank). This ranks chunks high only if they appear in both lists or very high in one.
+
+Cross-encoder reranking — The top candidates are scored jointly by a cross-encoder. This is more accurate than RRF because it reads query and document together.
+
+Prompt construction — The final top-K chunks are formatted with source attributions and passed to the LLM with a system prompt that requires answering only from the provided context.
+
+Citations from used chunks are persisted to the citations table alongside the assistant message.
+
+Multi-Tenancy and Authorization
+Authorization is enforced at retrieval time, not as a post-filter. Every SQL query in the retrieval pipeline includes WHERE d.organization_id = $orgId. There is no code path that retrieves cross-tenant content, even transiently.
+
+Chunks inherit their parent document's organization_id. Documents are owned by a user but scoped to the organization. JWT payloads carry organizationId, which flows into every service call.
+
+Development Workflow
+bash
+# Start infrastructure
+docker compose up -d
+
+# Start API with hot reload
+npm run dev --workspace apps/api
+
+# Type-check and build
+npm run build --workspace apps/api
+
+# Inspect infrastructure logs
+docker compose logs -f tika
+docker compose logs -f postgres
+Adding a database column
+Edit apps/api/src/db/schema.sql — add the column to the CREATE TABLE block and an idempotent ALTER TABLE ... ADD COLUMN IF NOT EXISTS ... at the bottom.
+
+Restart the API. initDb() runs on every boot and applies both.
+
+Update the corresponding *Row interface and repository functions.
+
+Switching reranker providers
+Edit .env:
+
+env
+# Zero-download passthrough (default)
+RERANKER_PROVIDER=mock
+
+# Local cross-encoder (~280MB download, runs on CPU)
+RERANKER_PROVIDER=local
+The provider is resolved on first use and cached for the process lifetime.
+
+Docker Services
+Service	Image	Port	Notes
+postgres	pgvector/pgvector:pg16	5432	Includes the vector extension
+redis	redis:7-alpine	6379	Queue backend
+minio	minio/minio:latest	9000, 9001	S3 API + web console
+tika	apache/tika:latest	9998	JVM — first boot takes ~20s
+MinIO console credentials: minioadmin / minioadmin at http://localhost:9001.
+
+Free vs Paid Resources
+Component	Development	Production
+PostgreSQL + pgvector	Docker (free)	Neon / Supabase / self-hosted (free tiers available)
+Redis	Docker (free)	Upstash (free tier)
+Object storage	MinIO (free)	Cloudflare R2 (10GB free, $0 egress)
+Tika	Docker (free)	Same Docker image, any host
+Embeddings	Mock provider (free)	OpenAI (~$0.02 / 1M tokens)
+Reranker	Local ONNX (free)	Same, or Cohere (paid)
+LLM	Mock provider (free)	OpenAI / Anthropic (usage-based)
+Aperture is fully functional in development with zero paid API calls — mock providers synthesize extractive answers from retrieved chunks.
+

@@ -27,6 +27,8 @@ const envSchema = z.object({
   RERANKER_PROVIDER: z.enum(['mock', 'local', 'cohere']).default('mock'),
   RERANKER_MODEL: z.string().default('Xenova/bge-reranker-base'),
   RERANK_TOP_K: z.coerce.number().default(5),
+  HISTORY_RECENT_MESSAGES: z.coerce.number().default(12),
+  HISTORY_SUMMARY_MIN_MESSAGES: z.coerce.number().default(6),
 });
 
 export const env = envSchema.parse(process.env);
