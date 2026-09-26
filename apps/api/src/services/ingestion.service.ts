@@ -1,51 +1,76 @@
-import { findDocumentById, updateDocumentStatus } from '../repositories/document.repository';
-import { insertChunks } from '../repositories/documentChunk.repository';
 import { getEmbeddingProvider } from '../providers/embeddings';
-import { chunkText } from './chunker';
-import { parseDocumentToText, UnsupportedFileTypeError } from './parser.service';
+import { insertChunks } from '../repositories/documentChunk.repository';
+import {
+  markDocumentFailed,
+  markDocumentReady,
+} from './document.service';
+
+const CHUNK_SIZE = 800;    // characters
+const CHUNK_OVERLAP = 120; // characters
+
+export interface ParsedChunk {
+  content: string;
+  chunkIndex: number;
+}
 
 /**
- * Runs the full ingestion pipeline for a single document:
- *   parse -> structure-lite chunk -> embed (batched) -> persist chunks -> mark ready
- *
- * Matches the stage order in docs/architecture.md Section 13, but runs
- * synchronously and in-process rather than via a queue+worker pool. That
- * async/queue layer (with retries and a dead-letter queue) is documented as
- * a Production-V1 concern in the roadmap (Phase 5) -- deliberately deferred
- * here so the MVP has no external queue/broker dependency. The document's
- * `status` field is the seam: a future queue-backed worker calls exactly
- * this function as its job handler.
+ * Naive character-based chunking with overlap.
+ * Replace with structure-aware / token-aware chunking in a later phase.
  */
-export async function ingestDocument(documentId: string, fileBuffer: Buffer): Promise<void> {
-  const document = findDocumentById(documentId);
-  if (!document) {
-    throw new Error(`Cannot ingest unknown document ${documentId}`);
+export function chunkText(text: string): ParsedChunk[] {
+  const normalized = text.replace(/\r\n/g, '\n').trim();
+  if (!normalized) return [];
+
+  const chunks: ParsedChunk[] = [];
+  let start = 0;
+  let index = 0;
+
+  while (start < normalized.length) {
+    const end = Math.min(start + CHUNK_SIZE, normalized.length);
+    const slice = normalized.slice(start, end).trim();
+    if (slice.length > 0) {
+      chunks.push({ content: slice, chunkIndex: index++ });
+    }
+    if (end === normalized.length) break;
+    start = end - CHUNK_OVERLAP;
   }
 
+  return chunks;
+}
+
+export async function ingestDocument(
+  documentId: string,
+  rawText: string
+): Promise<{ chunkCount: number }> {
   try {
-    const text = parseDocumentToText(fileBuffer, document.mime_type);
-    const chunks = chunkText(text);
-
+    const chunks = chunkText(rawText);
     if (chunks.length === 0) {
-      updateDocumentStatus(documentId, 'failed', 'Document contained no extractable text.');
-      return;
+      throw new Error('No extractable content in document');
     }
 
-    const embeddingProvider = getEmbeddingProvider();
-    const embeddings = await embeddingProvider.embed(chunks);
+    const embedder = getEmbeddingProvider();
+    // Batch embeddings to avoid huge single requests.
+    const BATCH = 64;
+    const enriched: Array<{ content: string; chunkIndex: number; embedding: number[] }> = [];
 
-    insertChunks(
-      documentId,
-      chunks.map((content, index) => ({ content, chunkIndex: index, embedding: embeddings[index] }))
-    );
-
-    updateDocumentStatus(documentId, 'ready', null);
-  } catch (error) {
-    const message = error instanceof UnsupportedFileTypeError ? error.message : 'Ingestion failed unexpectedly.';
-    updateDocumentStatus(documentId, 'failed', message);
-    if (!(error instanceof UnsupportedFileTypeError)) {
-      // eslint-disable-next-line no-console
-      console.error(`Ingestion failed for document ${documentId}:`, error);
+    for (let i = 0; i < chunks.length; i += BATCH) {
+      const batch = chunks.slice(i, i + BATCH);
+      const embeddings = await embedder.embed(batch.map((c) => c.content));
+      for (let j = 0; j < batch.length; j++) {
+        enriched.push({
+          content: batch[j].content,
+          chunkIndex: batch[j].chunkIndex,
+          embedding: embeddings[j],
+        });
+      }
     }
+
+    await insertChunks(documentId, enriched);
+    await markDocumentReady(documentId);
+    return { chunkCount: enriched.length };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown ingestion error';
+    await markDocumentFailed(documentId, message);
+    throw err;
   }
 }

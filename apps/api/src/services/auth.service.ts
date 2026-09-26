@@ -1,65 +1,97 @@
 import bcrypt from 'bcryptjs';
-import { getDb } from '../db/database';
+import jwt from 'jsonwebtoken';
+import { env } from '../config/env';
+import {
+  createUser,
+  findUserByEmail,
+  findUserById,
+  UserRow,
+} from '../repositories/user.repository';
 import { createOrganization } from '../repositories/organization.repository';
-import { createUser, findUserByEmail, sanitizeUser } from '../repositories/user.repository';
-import { signAuthToken } from '../utils/jwt';
-import { LoginInput, RegisterInput } from '../utils/validation';
 
-const SALT_ROUNDS = 12;
-
-export class EmailAlreadyRegisteredError extends Error {
-  constructor() {
-    super('An account with this email already exists.');
-  }
+export interface AuthResult {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: string;
+    organizationId: string;
+  };
 }
 
-export class InvalidCredentialsError extends Error {
-  constructor() {
-    super('Invalid email or password.');
-  }
+function toPublicUser(user: UserRow) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role,
+    organizationId: user.organization_id,
+  };
 }
 
-export async function registerUser(input: RegisterInput) {
-  const existing = findUserByEmail(input.email);
+function signToken(user: UserRow): string {
+  return jwt.sign(
+    {
+      userId: user.id,
+      organizationId: user.organization_id,
+      role: user.role,
+    },
+    env.JWT_SECRET,
+    { expiresIn: env.JWT_EXPIRES_IN }
+  );
+}
+
+export async function registerUser(input: {
+  email: string;
+  password: string;
+  name: string;
+  organizationName: string;
+}): Promise<AuthResult> {
+  const existing = await findUserByEmail(input.email);
   if (existing) {
-    throw new EmailAlreadyRegisteredError();
+    throw new Error('EMAIL_ALREADY_EXISTS');
   }
 
-  const passwordHash = await bcrypt.hash(input.password, SALT_ROUNDS);
+  const organization = await createOrganization(input.organizationName);
+  const passwordHash = await bcrypt.hash(input.password, 10);
 
-  // First user in a new organization is made "admin" -- a simple, explicit
-  // default rather than an implicit/hidden rule. better-sqlite3 transactions
-  // must be synchronous, so the async hash above happens before entering it;
-  // the org+user insert itself is then atomic.
-  const { user, organization } = getDb().transaction(() => {
-    const organization = createOrganization(input.organizationName);
-    const user = createUser({
-      email: input.email,
-      passwordHash,
-      name: input.name,
-      role: 'admin',
-      organizationId: organization.id
-    });
-    return { user, organization };
-  })();
+  const user = await createUser({
+    email: input.email,
+    passwordHash,
+    name: input.name,
+    organizationId: organization.id,
+    role: 'admin', // first user of an org is admin
+  });
 
-  const token = signAuthToken({ userId: user.id, organizationId: organization.id, role: user.role });
-
-  return { token, user: sanitizeUser(user), organization };
+  return {
+    token: signToken(user),
+    user: toPublicUser(user),
+  };
 }
 
-export async function loginUser(input: LoginInput) {
-  const user = findUserByEmail(input.email);
+export async function loginUser(input: {
+  email: string;
+  password: string;
+}): Promise<AuthResult> {
+  const user = await findUserByEmail(input.email);
   if (!user) {
-    throw new InvalidCredentialsError();
+    throw new Error('INVALID_CREDENTIALS');
   }
 
-  const passwordMatches = await bcrypt.compare(input.password, user.password_hash);
-  if (!passwordMatches) {
-    throw new InvalidCredentialsError();
+  const valid = await bcrypt.compare(input.password, user.password_hash);
+  if (!valid) {
+    throw new Error('INVALID_CREDENTIALS');
   }
 
-  const token = signAuthToken({ userId: user.id, organizationId: user.organization_id, role: user.role });
+  return {
+    token: signToken(user),
+    user: toPublicUser(user),
+  };
+}
 
-  return { token, user: sanitizeUser(user) };
+export async function getCurrentUser(userId: string) {
+  const user = await findUserById(userId);
+  if (!user) throw new Error('USER_NOT_FOUND');
+  return toPublicUser(user);
 }
