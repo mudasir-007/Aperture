@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/Login';
-import Chat from './pages/Chat';
+import Chat from './pages/chat';
 import { getToken } from './lib/api';
 
 function RequireAuth({ children }: { children: React.ReactNode }) {

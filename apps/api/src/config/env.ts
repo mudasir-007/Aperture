@@ -30,10 +30,14 @@ const envSchema = z.object({
   HISTORY_RECENT_MESSAGES: z.coerce.number().default(12),
   HISTORY_SUMMARY_MIN_MESSAGES: z.coerce.number().default(6),
   QUERY_REWRITE_ENABLED: z
-  .enum(['true', 'false'])
-  .default('true')
-  .transform((v) => v === 'true'),
+    .enum(['true', 'false'])
+    .default('true')
+    .transform((v) => v === 'true'),
   QUERY_REWRITE_MIN_HISTORY: z.coerce.number().default(2),
+  RATE_LIMIT_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
 });
 
