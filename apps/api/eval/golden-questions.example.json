@@ -1,0 +1,23 @@
+{
+  "organizationId": "REPLACE-WITH-ORG-UUID",
+  "topK": 5,
+  "candidatePool": 100,
+  "description": "Each question must be answerable from at least one document currently uploaded to the given organization. expectedDocumentFilenames lists any filenames considered correct.",
+  "questions": [
+    {
+      "id": "q1",
+      "question": "What was the revenue in Q3?",
+      "expectedDocumentFilenames": ["q3-report.pdf"]
+    },
+    {
+      "id": "q2",
+      "question": "How do I reset a user password?",
+      "expectedDocumentFilenames": ["admin-guide.pdf"]
+    },
+    {
+      "id": "q3",
+      "question": "What is the error code ERR_4032?",
+      "expectedDocumentFilenames": ["error-codes.md"]
+    }
+  ]
+}
